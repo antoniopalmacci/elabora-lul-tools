@@ -6,13 +6,16 @@ import lombok.Getter;
 import lombok.NonNull;
 
 public enum AbsenceType {
-	FER("FE", "Ferie", "E"),
+	FER("FE", "Ferie", "E"), // first absence column
 	MAL("MA", "Malattia", "F"),
 	IN("IN", "Infortunio", "F"),
-	CGR("A8", "Congedo genitoriale retribuito", "G"),
+	INT("IR", "Assenza per intervento", "F"),
 	PR("RL", "Permesso retribuito", "G"),
 	CP("CP", "Congedo genitoriale retribuito", "G"),
+	CGR("A8", "Congedo genitoriale retribuito", "G"),
 	PG("PG", "Perm. disabili", "G"),
+	CD("CD", "Congedi str.dis.", "G"),
+	AP("AP", "Aspettativa non retribuita", "H"),
 	PNR("PN", "Permesso non retribuito", "H"),
 	NL("NL", "Non lavorato", "H"),
 	PS("P1", "Permesso studio", "M"),
@@ -20,16 +23,13 @@ public enum AbsenceType {
 	MAT("MT", "Maternità obbligatoria", "P"),
 	ALL("AL", "Allattamento", "P"),
 	NOT("ON", "Orario notturno", "R"),
+	SC("SC", "Sciopero", "S"),
 	CM("CM", "Congedo matrimoniale", "T"),
 	L104("PH", "Assenza legge 104", "U"),
 	CIG("CA", "Cassa integrazione", "W"),
 	ASS("A1", "Assegno ordinario", "W"),
-	LUT("PL", "Assenza per lutto", "Y"),
-	INT("IR", "Assenza per intervento", null),
+	LUT("PL", "Assenza per lutto", "Y"), // last absence column
 	DIM("AH", "Assenza per dimissioni", null),
-	AP("AP", "Aspettativa non retribuita", null),
-	CD("CD", "Congedi str.dis.", null),
-	SC("SC", "Sciopero", null),
 	RE("RE", "Reperibilità", null);
 
 	private final @Getter String code;

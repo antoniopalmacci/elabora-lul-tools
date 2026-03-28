@@ -7,7 +7,8 @@ import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.commons.math3.util.Pair;
+import org.apache.commons.lang3.tuple.Pair;
+
 import org.springframework.stereotype.Component;
 
 import com.itextpdf.text.Rectangle;
@@ -74,173 +75,185 @@ public class PdfReportParser {
 		return result;
 	}
 
-	public MonthlyReport parsePageContent(@NonNull String pageContent) {
-		MonthlyReport result = new MonthlyReport();
-		Employee employee = new Employee();
-		Company company = new Company();
-		String lines[] = pageContent.split("\\r?\\n");
-		List<Pair<String, ParserStatus>> elemsWithLabels = new ArrayList<>();
-		int elemIndex = 0;
-		for (String line : lines) {
-			String stringToParse = line.trim().replaceAll(" +", " ");
-			if (!stringToParse.isEmpty()) {
-				if (stringToParse.equalsIgnoreCase(ParserPattern.COMPANY)) {
-					elemsWithLabels.add(Pair.create(stringToParse, ParserStatus.COMPANY_START));
-				} else if (elemsWithLabels.size() >= 1
-						&& elemsWithLabels.get(elemIndex - 1).getValue() == ParserStatus.COMPANY_START) {
-					// company name
-					company.setName(stringToParse);
-					elemsWithLabels.add(Pair.create(stringToParse, ParserStatus.COMPANY_PARSING));
-				} else if (elemsWithLabels.size() >= 2
-						&& elemsWithLabels.get(elemIndex - 2).getValue() == ParserStatus.COMPANY_START) {
-					// company address
-					company.setAddress(stringToParse);
-					elemsWithLabels.add(Pair.create(stringToParse, ParserStatus.COMPANY_PARSING));
-				} else if (ParserPattern.EMPLOYEE_ID_REGEX_PATTERN.matcher(stringToParse).matches()) {
-					// employee ID
-					employee.setId(stringToParse);
-					elemsWithLabels.add(Pair.create(stringToParse, ParserStatus.EMPLOYEE_START));
-				} else if (elemsWithLabels.size() >= 1
-						&& elemsWithLabels.get(elemIndex - 1).getValue() == ParserStatus.EMPLOYEE_START) {
-					// employee surname and name
-					String employeeFullName = stringToParse;
-					String[] nameElements = employeeFullName.split("\\s");
-					String name = "";
-					String surname = "";
-					if (employeeFullName.toLowerCase().startsWith("di ") && nameElements.length > 2) {
-						surname = nameElements[0] + " " + nameElements[1];
-						name = "";
-						for (int i = 2; i < nameElements.length; i++) {
-							name = name + " " + nameElements[i];
-						}
-					} else if (nameElements.length > 2) {
-						surname = nameElements[0];
-						name = "";
-						for (int i = 1; i < nameElements.length; i++) {
-							name = name + " " + nameElements[i];
-						}
-					} else {
-						surname = nameElements[0];
-						name = nameElements[1];
-					}
-					employee.setName(name.trim());
-					employee.setSurname(surname.trim());
-					elemsWithLabels.add(Pair.create(stringToParse, ParserStatus.EMPLOYEE_PARSING));
-				} else if (elemsWithLabels.size() >= 2
-						&& elemsWithLabels.get(elemIndex - 2).getValue() == ParserStatus.EMPLOYEE_START) {
-					// employee address
-					employee.setAddress(stringToParse);
-					elemsWithLabels.add(Pair.create(stringToParse, ParserStatus.EMPLOYEE_PARSING));
-				} else if (elemsWithLabels.size() >= 3
-						&& elemsWithLabels.get(elemIndex - 3).getValue() == ParserStatus.EMPLOYEE_START) {
-					// employee CAP
-					employee.setCap(stringToParse);
-					elemsWithLabels.add(Pair.create(stringToParse, ParserStatus.EMPLOYEE_PARSING));
-				} else if (startsWithMonth(stringToParse)) {
-					// month, year and contract type
-					String[] elements = stringToParse.split("\\s");
-					Month month = Month.of(elements[0]);
-					int year = Integer.parseInt(elements[1]);
-					String workContractType = "";
-					for (int j = 2; j < elements.length; j++) {
-						workContractType = workContractType + " " + elements[j];
-					}
-					result.setMonth(month);
-					result.setYear(year);
-					result.setWorkContractType(workContractType);
-					elemsWithLabels.add(Pair.create(stringToParse, ParserStatus.MONTH_YEAR_CONTRACT_TYPE));
-				} else if (elemsWithLabels.size() >= 1
-						&& elemsWithLabels.get(elemIndex - 1).getValue() == ParserStatus.MONTH_YEAR_CONTRACT_TYPE) {
-					// employee fiscal code
-					employee.setFiscalCode(stringToParse.split(" ")[0]);
-					elemsWithLabels.add(Pair.create(stringToParse, ParserStatus.EMPLOYEE_PARSING));
-				} else if (startsWithWeekDayNum(stringToParse)) {
+public MonthlyReport parsePageContent(@NonNull String pageContent) {
+    MonthlyReport result = new MonthlyReport();
+    Employee employee = new Employee();
+    Company company = new Company();
+    String lines[] = pageContent.split("\\r?\\n");
+    List<Pair<String, ParserStatus>> elemsWithLabels = new ArrayList<>();
+    int elemIndex = 0;
+
+    for (String line : lines) {
+        String stringToParse = line.trim().replaceAll(" +", " ");
+        if (!stringToParse.isEmpty()) {
+
+            if (stringToParse.equalsIgnoreCase(ParserPattern.COMPANY)) {
+                elemsWithLabels.add(Pair.of(stringToParse, ParserStatus.COMPANY_START));
+
+            } else if (elemsWithLabels.size() >= 1
+                    && elemsWithLabels.get(elemIndex - 1).getValue() == ParserStatus.COMPANY_START) {
+                company.setName(stringToParse);
+                elemsWithLabels.add(Pair.of(stringToParse, ParserStatus.COMPANY_PARSING));
+
+            } else if (elemsWithLabels.size() >= 2
+                    && elemsWithLabels.get(elemIndex - 2).getValue() == ParserStatus.COMPANY_START) {
+                company.setAddress(stringToParse);
+                elemsWithLabels.add(Pair.of(stringToParse, ParserStatus.COMPANY_PARSING));
+
+            } else if (ParserPattern.EMPLOYEE_ID_REGEX_PATTERN.matcher(stringToParse).matches()) {
+                employee.setId(stringToParse);
+                elemsWithLabels.add(Pair.of(stringToParse, ParserStatus.EMPLOYEE_START));
+
+            } else if (elemsWithLabels.size() >= 1
+                    && elemsWithLabels.get(elemIndex - 1).getValue() == ParserStatus.EMPLOYEE_START) {
+
+                String employeeFullName = stringToParse;
+                String[] nameElements = employeeFullName.split("\\s");
+                String name = "";
+                String surname = "";
+
+                if (employeeFullName.toLowerCase().startsWith("di ") && nameElements.length > 2) {
+                    surname = nameElements[0] + " " + nameElements[1];
+                    for (int i = 2; i < nameElements.length; i++) name += " " + nameElements[i];
+
+                } else if (nameElements.length > 2) {
+                    surname = nameElements[0];
+                    for (int i = 1; i < nameElements.length; i++) name += " " + nameElements[i];
+
+                } else {
+                    surname = nameElements[0];
+                    name = nameElements[1];
+                }
+
+                employee.setName(name.trim());
+                employee.setSurname(surname.trim());
+                elemsWithLabels.add(Pair.of(stringToParse, ParserStatus.EMPLOYEE_PARSING));
+
+            } else if (elemsWithLabels.size() >= 2
+                    && elemsWithLabels.get(elemIndex - 2).getValue() == ParserStatus.EMPLOYEE_START) {
+                employee.setAddress(stringToParse);
+                elemsWithLabels.add(Pair.of(stringToParse, ParserStatus.EMPLOYEE_PARSING));
+
+            } else if (elemsWithLabels.size() >= 3
+                    && elemsWithLabels.get(elemIndex - 3).getValue() == ParserStatus.EMPLOYEE_START) {
+                employee.setCap(stringToParse);
+                elemsWithLabels.add(Pair.of(stringToParse, ParserStatus.EMPLOYEE_PARSING));
+
+            } else if (startsWithMonth(stringToParse)) {
+
+                String[] elements = stringToParse.split("\\s");
+                Month month = Month.of(elements[0]);
+                int year = Integer.parseInt(elements[1]);
+                String workContractType = "";
+                for (int j = 2; j < elements.length; j++) workContractType += " " + elements[j];
+
+                result.setMonth(month);
+                result.setYear(year);
+                result.setWorkContractType(workContractType);
+                elemsWithLabels.add(Pair.of(stringToParse, ParserStatus.MONTH_YEAR_CONTRACT_TYPE));
+
+            } else if (elemsWithLabels.size() >= 1
+                    && elemsWithLabels.get(elemIndex - 1).getValue() == ParserStatus.MONTH_YEAR_CONTRACT_TYPE) {
+
+                employee.setFiscalCode(stringToParse.split(" ")[0]);
+                elemsWithLabels.add(Pair.of(stringToParse, ParserStatus.EMPLOYEE_PARSING));
+
+            } else if (startsWithWeekDayNum(stringToParse)) {
+
+                String[] dailyReportInfo = stringToParse.split("\\s");
+                if (dailyReportInfo.length < 2) {
+                    log.error(String.format(
+                            "Impossibile riconoscere il formato del report giornaliero per la riga: '%s'. Giorno della settimana non presente.",
+                            stringToParse));
+                } else {
 					// daily report
 					// Expected format:
-					// MA 4 5,00 (opzionale, ordinarie) 1,00 (opzionale, straordinarie) RL
-					// (opzionale, giustificativo assenza) 2,00 (opzionale, ore assenza)
-					String[] dailyReportInfo = stringToParse.split("\\s");
-					if (dailyReportInfo.length < 2) {
-						log.error(String.format(
-								"Impossibile riconoscere il formato del report giornaliero per la riga: '%s'. Giorno della settimana non presente.",
-								stringToParse));
-					} else {
-						WeekDay weekDay = WeekDay.of(dailyReportInfo[0]);
-						int monthDay = Integer.parseInt(dailyReportInfo[1]);
-						DailyReport dailyReport = new DailyReport();
-						dailyReport.setDay(monthDay);
-						dailyReport.setWeekDay(weekDay);
-						if (dailyReportInfo.length >= 3) {
-							String element = dailyReportInfo[2];
-							if (isNumber(element)) {
-								// ore lavorative ordinarie o festive
-								if (weekDay == WeekDay.SATURDAY || weekDay == WeekDay.SUNDAY) {
-									// festive
-									dailyReport.setOrdinaryWorkAttendanceMinutes(
-											Pair.create(WorkAttendanceType.FESTIVA, getMinutes(element)));
-								} else {
-									// ordinarie
-									dailyReport.setOrdinaryWorkAttendanceMinutes(
-											Pair.create(WorkAttendanceType.ORDINARIA, getMinutes(element)));
-								}
-							} else {
-								// giustificativo assenza
-								AbsenceType absenceType = AbsenceType.of(element);
-								dailyReport.setAbscenceMinutes(Pair.create(absenceType, 0));
-							}
-						}
-						if (dailyReportInfo.length >= 4) {
-							String element = dailyReportInfo[3];
-							if (isNumber(element)) {
-								if (dailyReport.getAbscenceMinutes() != null) {
-									// ore assenza
-									AbsenceType absenceType = dailyReport.getAbscenceMinutes().getFirst();
-									int absenceMinutes = getMinutes(element);
-									dailyReport.setAbscenceMinutes(Pair.create(absenceType, absenceMinutes));
-								} else {
-									// ore lavorative straordinarie
-									dailyReport.setExtraWorkAttendanceMinutes(
-											Pair.create(WorkAttendanceType.STRAORDINARIA, getMinutes(element)));
-								}
-							} else {
-								// giustificativo assenza
-								AbsenceType absenceType = AbsenceType.of(element);
-								dailyReport.setAbscenceMinutes(Pair.create(absenceType, 0));
-							}
-						}
-						if (dailyReportInfo.length >= 5) {
-							String element = dailyReportInfo[4];
-							if (isNumber(element)) {
-								// ore assenza
-								AbsenceType absenceType = dailyReport.getAbscenceMinutes().getFirst();
-								int absenceMinutes = getMinutes(element);
-								dailyReport.setAbscenceMinutes(Pair.create(absenceType, absenceMinutes));
-							} else {
-								// giustificativo assenza
-								AbsenceType absenceType = AbsenceType.of(element);
-								dailyReport.setAbscenceMinutes(Pair.create(absenceType, 0));
-							}
-						}
-						if (dailyReportInfo.length >= 6 && isNumber(dailyReportInfo[5])) {
-							// ore assenza
-							AbsenceType absenceType = dailyReport.getAbscenceMinutes().getFirst();
-							int absenceMinutes = getMinutes(dailyReportInfo[5]);
-							dailyReport.setAbscenceMinutes(Pair.create(absenceType, absenceMinutes));
-						}
-						result.addDailyReport(dailyReport);
-					}
+					// MA 4 5,00 (opzionale, ordinarie) 1,00 (opzionale, straordinarie)
+					// RL (opzionale, giustificativo assenza) 2,00 (opzionale, ore assenza)
+					// AI (opzionale, giustificativo assenza) 4,00 (opzionale, ore assenza)
+					// .....
 
-					elemsWithLabels.add(Pair.create(stringToParse, ParserStatus.DAILY_REPORT));
-				} else {
-					elemsWithLabels.add(Pair.create(stringToParse, ParserStatus.NO_DATA));
-				}
-				elemIndex += 1;
-			}
-		}
-		employee.setCompany(company);
-		result.setEmployee(employee);
-		return result;
-	}
+                    WeekDay weekDay = WeekDay.of(dailyReportInfo[0]);
+                    int monthDay = Integer.parseInt(dailyReportInfo[1]);
+                    DailyReport dailyReport = new DailyReport();
+                    dailyReport.setDay(monthDay);
+                    dailyReport.setWeekDay(weekDay);
+
+                    // inizializziamo la lista delle assenze
+                    dailyReport.setAbscenceMinutes(new ArrayList<>());
+
+                    // --- ELEMENTO 3 ---
+                    if (dailyReportInfo.length >= 3) {
+                        String element = dailyReportInfo[2];
+                        if (isNumber(element)) {
+                            if (weekDay == WeekDay.SATURDAY || weekDay == WeekDay.SUNDAY) {
+                                dailyReport.setOrdinaryWorkAttendanceMinutes(
+                                        Pair.of(WorkAttendanceType.FESTIVA, getMinutes(element)));
+                            } else {
+                                dailyReport.setOrdinaryWorkAttendanceMinutes(
+                                        Pair.of(WorkAttendanceType.ORDINARIA, getMinutes(element)));
+                            }
+                        } else {
+                            AbsenceType absenceType = AbsenceType.of(element);
+                            dailyReport.getAbscenceMinutes().add(Pair.of(absenceType, 0));
+                        }
+                    }
+
+                    // --- ELEMENTO 4 ---
+                    if (dailyReportInfo.length >= 4) {
+                        String element = dailyReportInfo[3];
+                        if (isNumber(element)) {
+                            if (!dailyReport.getAbscenceMinutes().isEmpty()) {
+                                List<Pair<AbsenceType, Integer>> list = dailyReport.getAbscenceMinutes();
+                                AbsenceType absenceType = list.get(list.size() - 1).getLeft();
+                                list.add(Pair.of(absenceType, getMinutes(element)));
+                            } else {
+                                dailyReport.setExtraWorkAttendanceMinutes(
+                                        Pair.of(WorkAttendanceType.STRAORDINARIA, getMinutes(element)));
+                            }
+                        } else {
+                            AbsenceType absenceType = AbsenceType.of(element);
+                            dailyReport.getAbscenceMinutes().add(Pair.of(absenceType, 0));
+                        }
+                    }
+
+                    // --- ELEMENTO 5 ---
+                    if (dailyReportInfo.length >= 5) {
+                        String element = dailyReportInfo[4];
+                        if (isNumber(element)) {
+                            List<Pair<AbsenceType, Integer>> list = dailyReport.getAbscenceMinutes();
+                            AbsenceType absenceType = list.get(list.size() - 1).getLeft();
+                            list.add(Pair.of(absenceType, getMinutes(element)));
+                        } else {
+                            AbsenceType absenceType = AbsenceType.of(element);
+                            dailyReport.getAbscenceMinutes().add(Pair.of(absenceType, 0));
+                        }
+                    }
+
+                    // --- ELEMENTO 6 ---
+                    if (dailyReportInfo.length >= 6 && isNumber(dailyReportInfo[5])) {
+                        List<Pair<AbsenceType, Integer>> list = dailyReport.getAbscenceMinutes();
+                        AbsenceType absenceType = list.get(list.size() - 1).getLeft();
+                        list.add(Pair.of(absenceType, getMinutes(dailyReportInfo[5])));
+                    }
+
+                    result.addDailyReport(dailyReport);
+                }
+
+                elemsWithLabels.add(Pair.of(stringToParse, ParserStatus.DAILY_REPORT));
+
+            } else {
+                elemsWithLabels.add(Pair.of(stringToParse, ParserStatus.NO_DATA));
+            }
+
+            elemIndex += 1;
+        }
+    }
+
+    employee.setCompany(company);
+    result.setEmployee(employee);
+    return result;
+}
 
 	private boolean startsWithMonth(@NonNull String line) {
 		boolean result = false;

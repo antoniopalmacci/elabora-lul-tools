@@ -1,5 +1,6 @@
 package it.ecubit.elabora.lul.tools.exporter;
 
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -8,6 +9,7 @@ import java.text.DecimalFormat;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -25,6 +27,9 @@ import org.apache.poi.ss.usermodel.VerticalAlignment;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
+import org.apache.commons.lang3.tuple.Pair;
+
+
 import org.springframework.stereotype.Component;
 
 import it.ecubit.elabora.lul.tools.enums.AbsenceType;
@@ -35,34 +40,71 @@ import it.ecubit.elabora.lul.tools.utils.NationalHolidays;
 
 import lombok.NonNull;
 
-@Component
-public class ExcelLulExporter {
+	@Component
+	public class ExcelLulExporter {
 
-	private static final DecimalFormat EXCEL_EXPORTER_DEFAULT_NUMERIC_FORMATTER = new DecimalFormat("0.00");
+		private static final DecimalFormat EXCEL_EXPORTER_DEFAULT_NUMERIC_FORMATTER = new DecimalFormat("0.00");
 
-	public void export(@NonNull Map<String, List<MonthlyReport>> reportsForMonthMap, @NonNull Path storageDirPath,
-			@NonNull String filename) throws IOException {
+		public void export(@NonNull Map<String, List<MonthlyReport>> reportsForMonthMap,
+					@NonNull Path storageDirPath,
+					@NonNull String filename) {
+
 		Workbook wb = new XSSFWorkbook();
+
 		List<String> monthYearsList = new ArrayList<>(reportsForMonthMap.keySet());
 		monthYearsList.sort(new MonthYearStringComparator());
-		monthYearsList.forEach(
-				monthYear -> {
-					Sheet sheet = wb.createSheet(monthYear);
-					sheet.setDisplayGridlines(false);
-					createHeader(wb, sheet);
-					List<MonthlyReport> monthlyReports = reportsForMonthMap.get(monthYear);
-					int startRow = 1;
-					for (MonthlyReport monthlyReport : monthlyReports) {
-						startRow = createRowsForEmployeeMonthlyReport(wb, sheet, monthlyReport, startRow);
-					}
-				});
+
+		monthYearsList.forEach(monthYear -> {
+			Sheet sheet = wb.createSheet(monthYear);
+			sheet.setDisplayGridlines(false);
+			createHeader(wb, sheet);
+
+			List<MonthlyReport> monthlyReports = reportsForMonthMap.get(monthYear);
+			int startRow = 1;
+
+			for (MonthlyReport monthlyReport : monthlyReports) {
+				startRow = createRowsForEmployeeMonthlyReport(wb, sheet, monthlyReport, startRow);
+			}
+		});
+
 		Sheet templateSheet = wb.createSheet(WorkbookInfo.TEMPLATE_SHEET_NAME);
 		templateSheet.setDisplayGridlines(false);
 		createHeader(wb, templateSheet);
-		try (OutputStream fileOut = new FileOutputStream(storageDirPath.resolve(filename).toFile())) {
+
+		Path outputPath = storageDirPath.resolve(filename);
+
+		final String RED = "\u001B[31m";
+		final String YELLOW = "\u001B[33m";
+		final String RESET = "\u001B[0m";
+
+		try (OutputStream fileOut = new FileOutputStream(outputPath.toFile())) {
 			wb.write(fileOut);
+			System.out.println("File Excel generato correttamente: " + outputPath);
+
+		} catch (FileNotFoundException e) {
+			System.err.println(YELLOW +
+				"\n============================================================\n" +
+				"   ERRORE: IL FILE È APERTO IN EXCEL\n" +
+				"------------------------------------------------------------\n" +
+				"   Il file \"" + filename + "\" non può essere sovrascritto.\n" +
+				"   Chiudi il file Excel e riprova l'esportazione.\n" +
+				"============================================================\n" +
+				RESET
+			);
+			return;
+
+		} catch (IOException e) {
+			System.err.println(RED +
+				"\n============================================================\n" +
+				"   ERRORE DI SCRITTURA DEL FILE EXCEL\n" +
+				"------------------------------------------------------------\n" +
+				"   Dettagli: " + e.getMessage() + "\n" +
+				"============================================================\n" +
+				RESET
+			);
 		}
 	}
+
 
 	private void createHeader(@NonNull Workbook wb, @NonNull Sheet sheet) {
 		CellStyle headerStyle = createHeaderStyle(wb);
@@ -76,238 +118,154 @@ public class ExcelLulExporter {
 		}
 	}
 
-	private int createRowsForEmployeeMonthlyReport(@NonNull Workbook wb, @NonNull Sheet sheet,
-			@NonNull MonthlyReport monthlyReport, int startRow) {
+	// ------------------------------------------------------------
+	//  Utility: converte indice → lettera colonna Excel (0=A, 1=B...)
+	// ------------------------------------------------------------
+	private static String columnIndexToLetter(int index) {
+		StringBuilder sb = new StringBuilder();
+		while (index >= 0) {
+			sb.insert(0, (char) ('A' + (index % 26)));
+			index = (index / 26) - 1;
+		}
+		return sb.toString();
+	}
+
+	// ------------------------------------------------------------
+	//  Mappa lettera colonna Excel → indice colonna
+	// ------------------------------------------------------------
+	private static final Map<String, Integer> COLUMN_MAP = new HashMap<>();
+
+	static {
+		for (int i = 0; i < WorkbookInfo.SHEET_COLUMN_NAMES.length; i++) {
+			String letter = columnIndexToLetter(i);
+			COLUMN_MAP.put(letter, i);
+		}
+	}
+
+	// ------------------------------------------------------------
+	//  Funzione principale
+	// ------------------------------------------------------------
+	private int createRowsForEmployeeMonthlyReport(
+			@NonNull Workbook wb,
+			@NonNull Sheet sheet,
+			@NonNull MonthlyReport monthlyReport,
+			int startRow) {
+
 		AtomicInteger counter = new AtomicInteger(0);
 		final CellStyle dataCellStyle = createDataCellStyle(wb);
 		final Month month = monthlyReport.getMonth();
 		final int year = monthlyReport.getYear();
 		final Employee employee = monthlyReport.getEmployee();
-		final DateTimeFormatter fullDayFormmater = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+		final DateTimeFormatter fullDayFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+
 		monthlyReport.getDailyReports().forEach(dailyReport -> {
+
 			if (!NationalHolidays.isPublicHoliday(month, dailyReport.getDay(), year)) {
-				Row dailyReportRow = sheet.createRow(startRow + counter.get());
-				dailyReportRow.setHeightInPoints(12);
+
+				Row row = sheet.createRow(startRow + counter.get());
+				row.setHeightInPoints(12);
 				counter.incrementAndGet();
+
+				// ------------------------------------------------------------
+				// 1) Pre-calcolo: somma minuti per colonna Excel (dinamico)
+				// ------------------------------------------------------------
+				Map<Integer, Integer> absenceMinutesByColumn = new HashMap<>();
+
+				if (dailyReport.getAbscenceMinutes() != null) {
+					for (Pair<AbsenceType, Integer> pair : dailyReport.getAbscenceMinutes()) {
+
+						AbsenceType type = pair.getLeft();
+						Integer minutes = pair.getRight();
+
+						if (type == null || minutes == null || minutes <= 0) {
+							continue;
+						}
+
+						String colLetter = type.getColumnName();
+						if (colLetter == null) {
+							continue;
+						}
+
+						Integer colIndex = COLUMN_MAP.get(colLetter);
+						if (colIndex == null) {
+							continue;
+						}
+
+						absenceMinutesByColumn.merge(colIndex, minutes, Integer::sum);
+					}
+				}
+
+				// ------------------------------------------------------------
+				// 2) Scrittura colonne
+				// ------------------------------------------------------------
 				for (int column = 0; column < WorkbookInfo.SHEET_COLUMN_NAMES.length; column++) {
-					Cell dataCell = dailyReportRow.createCell(column);
-					dataCell.setCellStyle(dataCellStyle);
+
+					Cell cell = row.createCell(column);
+					cell.setCellStyle(dataCellStyle);
+
+					// --- Se la colonna è una colonna di assenza, la gestiamo dinamicamente ---
+					if (absenceMinutesByColumn.containsKey(column)) {
+						int minutes = absenceMinutesByColumn.get(column);
+						cell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
+						cell.setCellValue(minutes);
+						continue;
+					}
+
+					// --- Altrimenti gestiamo le colonne NON assenze ---
 					switch (column) {
-						case 0:
-							// surname
-							dataCell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
-							dataCell.setCellValue(employee.getSurname());
+
+						case 0: // Cognome
+							cell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
+							cell.setCellValue(employee.getSurname());
 							break;
-						case 1:
-							// name
-							dataCell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
-							dataCell.setCellValue(employee.getName());
+
+						case 1: // Nome
+							cell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
+							cell.setCellValue(employee.getName());
 							break;
-						case 2:
-							// day (full day format)
+
+						case 2: // Giorno (data completa)
 							LocalDate date = LocalDate.of(year, month.getMonthInYear(), dailyReport.getDay());
-							dataCell.setCellValue(fullDayFormmater.format(date));
+							cell.setCellValue(fullDayFormatter.format(date));
 							break;
-						case 3:
-							// presence
-							dataCell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-							dataCell.setCellValue(dailyReport.isPresent() ? 1 : 0);
+
+						case 3: // Presenza
+							cell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
+							cell.setCellValue(dailyReport.isPresent() ? 1 : 0);
 							break;
-						case 4:
-							// vacation
-							if (dailyReport.getAbscenceMinutes() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() == AbsenceType.FER &&
-									dailyReport.getAbscenceMinutes().getSecond() != null &&
-									dailyReport.getAbscenceMinutes().getSecond() > 0) {
-								dataCell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-								dataCell.setCellValue(dailyReport.getAbscenceMinutes().getSecond());
-							}
+
+						case 25: // ore lavorate
+							cell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
+							cell.setCellValue(EXCEL_EXPORTER_DEFAULT_NUMERIC_FORMATTER.format(
+									dailyReport.getTotWorkingHours()));
 							break;
-						case 5:
-							// sickness
-							if (dailyReport.getAbscenceMinutes() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() != null &&
-									(dailyReport.getAbscenceMinutes().getFirst() == AbsenceType.MAL 
-									|| dailyReport.getAbscenceMinutes().getFirst() == AbsenceType.IN) 
-									&&
-									dailyReport.getAbscenceMinutes().getSecond() != null &&
-									dailyReport.getAbscenceMinutes().getSecond() > 0) {
-								dataCell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-								dataCell.setCellValue(dailyReport.getAbscenceMinutes().getSecond());
-							}
+
+						case 26: // ore non lavorate
+							cell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
+							cell.setCellValue(EXCEL_EXPORTER_DEFAULT_NUMERIC_FORMATTER.format(
+									dailyReport.getTotNonWorkingHours()));
 							break;
-						case 6:
-							// paid leave
-							if (dailyReport.getAbscenceMinutes() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() != null &&
-									(dailyReport.getAbscenceMinutes().getFirst() == AbsenceType.PR
-											|| dailyReport.getAbscenceMinutes().getFirst() == AbsenceType.CGR
-											|| dailyReport.getAbscenceMinutes().getFirst() == AbsenceType.CP
-											|| dailyReport.getAbscenceMinutes().getFirst() == AbsenceType.PG)
-									&&
-									dailyReport.getAbscenceMinutes().getSecond() != null &&
-									dailyReport.getAbscenceMinutes().getSecond() > 0) {
-								dataCell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-								dataCell.setCellValue(dailyReport.getAbscenceMinutes().getSecond());
-							}
-							break;
-						case 7:
-							// unpaid leave or not worked
-							if (dailyReport.getAbscenceMinutes() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() != null &&
-									(dailyReport.getAbscenceMinutes().getFirst() == AbsenceType.PNR
-											|| dailyReport.getAbscenceMinutes().getFirst() == AbsenceType.NL)
-									&&
-									dailyReport.getAbscenceMinutes().getSecond() != null &&
-									dailyReport.getAbscenceMinutes().getSecond() > 0) {
-								dataCell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-								dataCell.setCellValue(dailyReport.getAbscenceMinutes().getSecond());
-							}
-							break;
-						case 14:
-							// blood donation
-							if (dailyReport.getAbscenceMinutes() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() == AbsenceType.DS &&
-									dailyReport.getAbscenceMinutes().getSecond() != null &&
-									dailyReport.getAbscenceMinutes().getSecond() > 0) {
-								dataCell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-								dataCell.setCellValue(dailyReport.getAbscenceMinutes().getSecond());
-							}
-							break;
-						case 12:
-							// study
-							if (dailyReport.getAbscenceMinutes() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() == AbsenceType.PS &&
-									dailyReport.getAbscenceMinutes().getSecond() != null &&
-									dailyReport.getAbscenceMinutes().getSecond() > 0) {
-								dataCell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-								dataCell.setCellValue(dailyReport.getAbscenceMinutes().getSecond());
-							}
-							break;
-						case 15:
-							// maternity or breastfeeding
-							if (dailyReport.getAbscenceMinutes() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() != null &&
-									(dailyReport.getAbscenceMinutes().getFirst() == AbsenceType.MAT
-											|| dailyReport.getAbscenceMinutes().getFirst() == AbsenceType.ALL)
-									&&
-									dailyReport.getAbscenceMinutes().getSecond() != null &&
-									dailyReport.getAbscenceMinutes().getSecond() > 0) {
-								dataCell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-								dataCell.setCellValue(dailyReport.getAbscenceMinutes().getSecond());
-							}
-							break;
-						case 17:
-							// overtime or night work
-							int overtimeOrNightWorkMinutes = 0;
-							if (dailyReport.getAbscenceMinutes() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() == AbsenceType.NOT &&
-									dailyReport.getAbscenceMinutes().getSecond() != null &&
-									dailyReport.getAbscenceMinutes().getSecond() > 0) {
-								overtimeOrNightWorkMinutes += dailyReport.getAbscenceMinutes().getSecond();
-							}
-							if (dailyReport.getExtraWorkAttendanceMinutes() != null &&
-									dailyReport.getExtraWorkAttendanceMinutes().getSecond() != null &&
-									dailyReport.getExtraWorkAttendanceMinutes().getSecond() > 0) {
-								overtimeOrNightWorkMinutes += dailyReport.getExtraWorkAttendanceMinutes().getSecond();
-							}
-							if (overtimeOrNightWorkMinutes > 0) {
-								dataCell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-								dataCell.setCellValue(overtimeOrNightWorkMinutes);
-							}
-							break;
-						case 18:
-							// strike
-							if (dailyReport.getAbscenceMinutes() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() == AbsenceType.SC &&
-									dailyReport.getAbscenceMinutes().getSecond() != null &&
-									dailyReport.getAbscenceMinutes().getSecond() > 0) {
-								dataCell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-								dataCell.setCellValue(dailyReport.getAbscenceMinutes().getSecond());
-							}
-							break;
-						case 19:
-							// marital leave
-							if (dailyReport.getAbscenceMinutes() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() == AbsenceType.CM &&
-									dailyReport.getAbscenceMinutes().getSecond() != null &&
-									dailyReport.getAbscenceMinutes().getSecond() > 0) {
-								dataCell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-								dataCell.setCellValue(dailyReport.getAbscenceMinutes().getSecond());
-							}
-							break;
-						case 20:
-							// absences related to situations egulated by the 104 law
-							if (dailyReport.getAbscenceMinutes() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() == AbsenceType.L104 &&
-									dailyReport.getAbscenceMinutes().getSecond() != null &&
-									dailyReport.getAbscenceMinutes().getSecond() > 0) {
-								dataCell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-								dataCell.setCellValue(dailyReport.getAbscenceMinutes().getSecond());
-							}
-							break;
-						case 22:
-							// layoffs
-							if (dailyReport.getAbscenceMinutes() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() != null &&
-									(dailyReport.getAbscenceMinutes().getFirst() == AbsenceType.CIG
-											|| dailyReport.getAbscenceMinutes().getFirst() == AbsenceType.ASS)
-									&&
-									dailyReport.getAbscenceMinutes().getSecond() != null &&
-									dailyReport.getAbscenceMinutes().getSecond() > 0) {
-								dataCell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-								dataCell.setCellValue(dailyReport.getAbscenceMinutes().getSecond());
-							}
-							break;
-						case 24:
-							// mourning
-							if (dailyReport.getAbscenceMinutes() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() != null &&
-									dailyReport.getAbscenceMinutes().getFirst() == AbsenceType.LUT &&
-									dailyReport.getAbscenceMinutes().getSecond() != null &&
-									dailyReport.getAbscenceMinutes().getSecond() > 0) {
-								dataCell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-								dataCell.setCellValue(dailyReport.getAbscenceMinutes().getSecond());
-							}
-							break;
-						case 25:
-							// tot working hours
-							dataCell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-							dataCell.setCellValue(
-									EXCEL_EXPORTER_DEFAULT_NUMERIC_FORMATTER.format(dailyReport.getTotWorkingHours()));
-							break;
-						case 26:
-							// tot non working hours
-							dataCell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-							dataCell.setCellValue(EXCEL_EXPORTER_DEFAULT_NUMERIC_FORMATTER
-									.format(dailyReport.getTotNonWorkingHours()));
-							break;
-						case 27:
-							// tot hours
+
+						case 27: // Totale ore
 							float totHours = dailyReport.getTotWorkingHours() + dailyReport.getTotNonWorkingHours();
-							dataCell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-							dataCell.setCellValue(EXCEL_EXPORTER_DEFAULT_NUMERIC_FORMATTER.format(totHours));
+							cell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
+							cell.setCellValue(EXCEL_EXPORTER_DEFAULT_NUMERIC_FORMATTER.format(totHours));
 							break;
-						case 28:
-							// fiscal code
-							dataCell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
-							dataCell.setCellValue(employee.getFiscalCode());
+
+						case 28: // Codice Fiscale
+							cell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
+							cell.setCellValue(employee.getFiscalCode());
 							break;
+
 						default:
-							// all other cases
-							dataCell.setCellValue("");
+							// tutte le altre colonne non usate rimangono vuote
+							cell.setCellValue("");
 							break;
 					}
 				}
 			}
 		});
+
 		return startRow + counter.get();
 	}
 
