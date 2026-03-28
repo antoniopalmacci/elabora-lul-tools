@@ -1,0 +1,11 @@
+# Properties for configuring Elabora LUL command line tools project
+spring:
+  application:
+    name: Elabora LUL command line tools
+  banner:
+    location: classpath:banner_ecubit_2022.txt
+  main:
+    log-startup-info: false
+  output:
+    ansi:
+      enabled: always
