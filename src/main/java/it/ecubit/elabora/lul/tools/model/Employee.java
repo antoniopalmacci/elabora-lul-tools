@@ -24,5 +24,10 @@ public class Employee implements Serializable {
 	private String cap;
 	private String fiscalCode;
 	private Company company;
-
+	private String headquarters;
+	private String employeeCode; // 0000009
+	private String level; // IMP A1
+	private String birthDate; // 09-12-1968
+	private String hireDate; // 01-12-2020
+	private String terminationDate; // opzionale
 }

@@ -160,6 +160,17 @@ import lombok.NonNull;
 
 		monthlyReport.getDailyReports().forEach(dailyReport -> {
 
+			List<Pair<AbsenceType, Integer>> absences = dailyReport.getAbscenceMinutes();
+			if (absences != null && !absences.isEmpty()) {
+				Pair<AbsenceType, Integer> firstPair = absences.get(0);
+				if (firstPair != null) {
+					AbsenceType type = firstPair.getLeft();
+					if (type != null && type == AbsenceType.DIM) {
+						return; // salta la riga se è un giorno di dimissioni (colonna "AH")
+					}
+				}
+			}
+
 			if (!NationalHolidays.isPublicHoliday(month, dailyReport.getDay(), year)) {
 
 				Row row = sheet.createRow(startRow + counter.get());
@@ -199,7 +210,7 @@ import lombok.NonNull;
 				// 2) Scrittura colonne
 				// ------------------------------------------------------------
 				for (int column = 0; column < WorkbookInfo.SHEET_COLUMN_NAMES.length; column++) {
-
+					
 					Cell cell = row.createCell(column);
 					cell.setCellStyle(dataCellStyle);
 
@@ -255,6 +266,36 @@ import lombok.NonNull;
 						case 28: // Codice Fiscale
 							cell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
 							cell.setCellValue(employee.getFiscalCode());
+							break;
+
+						case 29: // Sede
+							cell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
+							cell.setCellValue(employee.getHeadquarters());
+							break;
+
+						case 30: // Matricola
+							cell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
+							cell.setCellValue(employee.getEmployeeCode());
+							break;
+
+						case 31: // Livello
+							cell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
+							cell.setCellValue(employee.getLevel());
+							break;
+
+						case 32: // Data di nascita
+							cell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
+							cell.setCellValue(employee.getBirthDate());
+							break;
+
+						case 33: // Data assunzione
+							cell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
+							cell.setCellValue(employee.getHireDate());
+							break;
+
+						case 34: // Data cessazione
+							cell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
+							cell.setCellValue(employee.getTerminationDate());
 							break;
 
 						default:
