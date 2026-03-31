@@ -104,19 +104,24 @@ public class MonthlyReportParser {
 
             // --- HEADER CODICE DIPENDENTE ---
             if (s.contains("Codicesdipendente")) {
-                nextIsEmployeeCode = true;   // la prossima riga è il nome → da saltare
+                nextIsEmployeeCode = true; // da qui in poi cerchiamo la prima riga numerica
                 continue;
             }
 
-            // --- RIGA NOME (da saltare) ---
-            if (nextIsEmployeeCode && employee.getEmployeeCode() == null && s.matches("^[A-ZÀ-Ü]+( [A-ZÀ-Ü]+)+$")) {
-                continue;
-            }
-
-            // --- CODICE DIPENDENTE + CODICE FISCALE ---
+            // --- RIGA CODICE DIPENDENTE (prima riga che inizia con cifra) ---
             if (nextIsEmployeeCode) {
+
+                // se NON inizia con cifra → salta
+                if (!s.matches("^\\d+.*")) {
+                    continue;
+                }
+
+                // qui siamo sulla riga tipo: "0000009 RRGBBR68T49H501K"
                 String[] parts = s.split("\\s+");
-                if (parts.length >= 1) employee.setEmployeeCode(parts[0]); // 0000009
+                if (parts.length >= 1) {
+                    employee.setEmployeeCode(parts[0]); // 0000009
+                }
+
                 nextIsEmployeeCode = false;
                 continue;
             }
