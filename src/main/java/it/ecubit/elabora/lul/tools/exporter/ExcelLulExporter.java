@@ -351,21 +351,6 @@ public class ExcelLulExporter {
 			writeCell.accept(cell, column);
 		}
 
-/*
-		int daysInMonth = YearMonth.of(year, month.getMonthInYear()).lengthOfMonth();
-
-		for (int day = 1; day <= daysInMonth; day++) {
-
-			Row row = sheet.createRow(startRow + counter.get());
-			row.setHeightInPoints(12);
-			counter.incrementAndGet();
-
-			for (int column = 0; column < WorkbookInfo.SHEET_COLUMN_NAMES.length; column++) {
-				Cell cell = row.createCell(column);
-				writeCell.accept(cell, column);
-			}
-		}
-*/
 		return startRow + counter.get();
 	}
 

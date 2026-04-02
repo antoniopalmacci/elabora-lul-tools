@@ -11,7 +11,7 @@
 	</parent>
 	<groupId>it.ecubit</groupId>
 	<artifactId>elabora-lul-tools</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
+	<version>1.0.0</version>
 	<packaging>jar</packaging>
 	<name>LUL tools for the Elabora system</name>
 	<description>Implementation of the parser for Zucchetti report files and of the data export process in Excel format.</description>
@@ -30,12 +30,12 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter</artifactId>
 		</dependency>
-		<dependency>
+		<!-- <dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-devtools</artifactId>
 			<scope>runtime</scope>
 			<optional>true</optional>
-		</dependency>
+		</dependency> -->
 
 		<!-- Spring Configuration -->
 		<dependency>
@@ -76,41 +76,21 @@
     </dependencies>
 
   <build>
-      <plugins>
+  <plugins>
+    <plugin>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-maven-plugin</artifactId>
+      <version>3.5.13</version>
+      <executions>
+        <execution>
+          <goals>
+            <goal>repackage</goal>
+          </goals>
+        </execution>
+      </executions>
+    </plugin>
+  </plugins>
+</build>
 
-          <!-- Spring Boot plugin -->
-          <plugin>
-              <groupId>org.springframework.boot</groupId>
-              <artifactId>spring-boot-maven-plugin</artifactId>
-              <configuration>
-                  <excludes>
-                      <exclude>
-                          <groupId>org.projectlombok</groupId>
-                          <artifactId>lombok</artifactId>
-                      </exclude>
-                  </excludes>
-              </configuration>
-          </plugin>
-
-          <!-- Lombok annotation processor -->
-          <plugin>
-              <groupId>org.apache.maven.plugins</groupId>
-              <artifactId>maven-compiler-plugin</artifactId>
-              <version>3.11.0</version>
-              <configuration>
-                  <source>${java.version}</source>
-                  <target>${java.version}</target>
-                  <annotationProcessorPaths>
-                      <path>
-                          <groupId>org.projectlombok</groupId>
-                          <artifactId>lombok</artifactId>
-                          <version>1.18.30</version>
-                      </path>
-                  </annotationProcessorPaths>
-              </configuration>
-          </plugin>
-
-      </plugins>
-  </build>
 
 </project>
