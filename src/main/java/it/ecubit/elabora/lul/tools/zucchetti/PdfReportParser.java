@@ -4,13 +4,22 @@ import java.io.IOException;
 
 /* import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
-import java.text.ParseException; */
+import java.text.ParseException; 
+import it.ecubit.elabora.lul.tools.enums.AbsenceType;
+import it.ecubit.elabora.lul.tools.enums.Month;
+import it.ecubit.elabora.lul.tools.enums.WeekDay;
+import it.ecubit.elabora.lul.tools.enums.WorkAttendanceType;
+import it.ecubit.elabora.lul.tools.model.Company;
+import it.ecubit.elabora.lul.tools.model.DailyReport;
+import it.ecubit.elabora.lul.tools.model.Employee;
+import it.ecubit.elabora.lul.tools.model.MonthlyReport;
+import java.util.Arrays;
+import org.apache.commons.lang3.tuple.Pair;
+*/
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
-import org.apache.commons.lang3.tuple.Pair;
 
 import org.springframework.stereotype.Component;
 
@@ -20,14 +29,6 @@ import com.itextpdf.text.pdf.parser.LocationTextExtractionStrategy;
 import com.itextpdf.text.pdf.parser.PdfReaderContentParser;
 import com.itextpdf.text.pdf.parser.TextExtractionStrategy;
 
-import it.ecubit.elabora.lul.tools.enums.AbsenceType;
-import it.ecubit.elabora.lul.tools.enums.Month;
-import it.ecubit.elabora.lul.tools.enums.WeekDay;
-import it.ecubit.elabora.lul.tools.enums.WorkAttendanceType;
-import it.ecubit.elabora.lul.tools.model.Company;
-import it.ecubit.elabora.lul.tools.model.DailyReport;
-import it.ecubit.elabora.lul.tools.model.Employee;
-import it.ecubit.elabora.lul.tools.model.MonthlyReport;
 import it.ecubit.elabora.lul.tools.model.PdfDocumentInfo;
 
 import lombok.NonNull;

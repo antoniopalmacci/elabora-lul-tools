@@ -9,6 +9,7 @@ import java.text.DecimalFormat;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,25 +30,26 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 import org.apache.commons.lang3.tuple.Pair;
 
-
 import org.springframework.stereotype.Component;
 
 import it.ecubit.elabora.lul.tools.enums.AbsenceType;
 import it.ecubit.elabora.lul.tools.enums.Month;
+import it.ecubit.elabora.lul.tools.model.DailyReport;
 import it.ecubit.elabora.lul.tools.model.Employee;
 import it.ecubit.elabora.lul.tools.model.MonthlyReport;
 import it.ecubit.elabora.lul.tools.utils.NationalHolidays;
 
 import lombok.NonNull;
+import java.util.function.BiConsumer;
 
-	@Component
-	public class ExcelLulExporter {
+@Component
+public class ExcelLulExporter {
 
-		private static final DecimalFormat EXCEL_EXPORTER_DEFAULT_NUMERIC_FORMATTER = new DecimalFormat("0.00");
+	private static final DecimalFormat EXCEL_EXPORTER_DEFAULT_NUMERIC_FORMATTER = new DecimalFormat("0.00");
 
-		public void export(@NonNull Map<String, List<MonthlyReport>> reportsForMonthMap,
-					@NonNull Path storageDirPath,
-					@NonNull String filename) {
+	public void export(@NonNull Map<String, List<MonthlyReport>> reportsForMonthMap,
+			@NonNull Path storageDirPath,
+			@NonNull String filename) {
 
 		Workbook wb = new XSSFWorkbook();
 
@@ -60,12 +62,19 @@ import lombok.NonNull;
 			createHeader(wb, sheet);
 
 			List<MonthlyReport> monthlyReports = reportsForMonthMap.get(monthYear);
+
+			// ORDINAMENTO ALFABETICO PER COGNOME + NOME
+			monthlyReports.sort(Comparator.comparing(
+					r -> (r.getEmployee().getSurname() + " " + r.getEmployee().getName()).toLowerCase()
+			));
+
 			int startRow = 1;
 
 			for (MonthlyReport monthlyReport : monthlyReports) {
 				startRow = createRowsForEmployeeMonthlyReport(wb, sheet, monthlyReport, startRow);
 			}
 		});
+
 
 		Sheet templateSheet = wb.createSheet(WorkbookInfo.TEMPLATE_SHEET_NAME);
 		templateSheet.setDisplayGridlines(false);
@@ -83,33 +92,30 @@ import lombok.NonNull;
 
 		} catch (FileNotFoundException e) {
 			System.err.println(YELLOW +
-				"\n============================================================\n" +
-				"   ERRORE: IL FILE È APERTO IN EXCEL\n" +
-				"------------------------------------------------------------\n" +
-				"   Il file \"" + filename + "\" non può essere sovrascritto.\n" +
-				"   Chiudi il file Excel e riprova l'esportazione.\n" +
-				"============================================================\n" +
-				RESET
-			);
+					"\n============================================================\n" +
+					"   ERRORE: IL FILE È APERTO IN EXCEL\n" +
+					"------------------------------------------------------------\n" +
+					"   Il file \"" + filename + "\" non può essere sovrascritto.\n" +
+					"   Chiudi il file Excel e riprova l'esportazione.\n" +
+					"============================================================\n" +
+					RESET);
 			return;
 
 		} catch (IOException e) {
 			System.err.println(RED +
-				"\n============================================================\n" +
-				"   ERRORE DI SCRITTURA DEL FILE EXCEL\n" +
-				"------------------------------------------------------------\n" +
-				"   Dettagli: " + e.getMessage() + "\n" +
-				"============================================================\n" +
-				RESET
-			);
+					"\n============================================================\n" +
+					"   ERRORE DI SCRITTURA DEL FILE EXCEL\n" +
+					"------------------------------------------------------------\n" +
+					"   Dettagli: " + e.getMessage() + "\n" +
+					"============================================================\n" +
+					RESET);
 		}
 	}
-
 
 	private void createHeader(@NonNull Workbook wb, @NonNull Sheet sheet) {
 		CellStyle headerStyle = createHeaderStyle(wb);
 		Row headerRow = sheet.createRow(0);
-		headerRow.setHeightInPoints(25);
+		headerRow.setHeightInPoints(30);
 		for (int column = 0; column < WorkbookInfo.SHEET_COLUMN_NAMES.length; column++) {
 			Cell headerCell = headerRow.createCell(column);
 			headerCell.setCellStyle(headerStyle);
@@ -119,7 +125,7 @@ import lombok.NonNull;
 	}
 
 	// ------------------------------------------------------------
-	//  Utility: converte indice → lettera colonna Excel (0=A, 1=B...)
+	// Utility: converte indice → lettera colonna Excel (0=A, 1=B...)
 	// ------------------------------------------------------------
 	private static String columnIndexToLetter(int index) {
 		StringBuilder sb = new StringBuilder();
@@ -131,7 +137,7 @@ import lombok.NonNull;
 	}
 
 	// ------------------------------------------------------------
-	//  Mappa lettera colonna Excel → indice colonna
+	// Mappa lettera colonna Excel → indice colonna
 	// ------------------------------------------------------------
 	private static final Map<String, Integer> COLUMN_MAP = new HashMap<>();
 
@@ -143,7 +149,7 @@ import lombok.NonNull;
 	}
 
 	// ------------------------------------------------------------
-	//  Funzione principale
+	// Funzione principale
 	// ------------------------------------------------------------
 	private int createRowsForEmployeeMonthlyReport(
 			@NonNull Workbook wb,
@@ -152,162 +158,233 @@ import lombok.NonNull;
 			int startRow) {
 
 		AtomicInteger counter = new AtomicInteger(0);
-		final CellStyle dataCellStyle = createDataCellStyle(wb);
+
+		// Stili indipendenti
+		final CellStyle left = createLeftStyle(wb);
+		final CellStyle center = createCenterStyle(wb);
+
 		final Month month = monthlyReport.getMonth();
 		final int year = monthlyReport.getYear();
 		final Employee employee = monthlyReport.getEmployee();
 		final DateTimeFormatter fullDayFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
-		monthlyReport.getDailyReports().forEach(dailyReport -> {
+		List<DailyReport> dailyReports = monthlyReport.getDailyReports();
 
-			List<Pair<AbsenceType, Integer>> absences = dailyReport.getAbscenceMinutes();
-			if (absences != null && !absences.isEmpty()) {
-				Pair<AbsenceType, Integer> firstPair = absences.get(0);
-				if (firstPair != null) {
-					AbsenceType type = firstPair.getLeft();
-					if (type != null && type == AbsenceType.DIM) {
-						return; // salta la riga se è un giorno di dimissioni (colonna "AH")
+		// ============================================================
+		// Funzione interna per scrivere una cella in base alla colonna
+		// ============================================================
+		BiConsumer<Cell, Integer> writeCell = (cell, column) -> {
+
+			switch (column) {
+
+				case 0: // Cognome
+					cell.setCellStyle(left);
+					cell.setCellValue(employee.getSurname());
+					break;
+
+				case 1: // Nome
+					cell.setCellStyle(left);
+					cell.setCellValue(employee.getName());
+					break;
+
+				case 2: // Data
+					cell.setCellStyle(center);
+					LocalDate date = LocalDate.of(year, month.getMonthInYear(),
+							(dailyReports != null && !dailyReports.isEmpty())
+									? dailyReports.get(counter.get() - 1).getDay()
+									: counter.get());
+					cell.setCellValue(fullDayFormatter.format(date));
+					break;
+
+				case 3: // Presenza
+					cell.setCellStyle(center);
+					if (dailyReports != null && !dailyReports.isEmpty()) {
+						DailyReport dr = dailyReports.get(counter.get() - 1);
+						cell.setCellValue(dr.isPresent() ? 1 : 0);
+					} else {
+						cell.setCellValue(0);
+					}
+					break;
+
+				case 25: // Ore lavorate
+					cell.setCellStyle(center);
+					if (dailyReports != null && !dailyReports.isEmpty()) {
+						cell.setCellValue(EXCEL_EXPORTER_DEFAULT_NUMERIC_FORMATTER.format(
+								dailyReports.get(counter.get() - 1).getTotWorkingHours()));
+					} else {
+						cell.setCellValue("");
+					}
+					break;
+
+				case 26: // Ore non lavorate
+					cell.setCellStyle(center);
+					if (dailyReports != null && !dailyReports.isEmpty()) {
+						cell.setCellValue(EXCEL_EXPORTER_DEFAULT_NUMERIC_FORMATTER.format(
+								dailyReports.get(counter.get() - 1).getTotNonWorkingHours()));
+					} else {
+						cell.setCellValue("");
+					}
+					break;
+
+				case 27: // Totale ore
+					cell.setCellStyle(center);
+					if (dailyReports != null && !dailyReports.isEmpty()) {
+						DailyReport dr = dailyReports.get(counter.get() - 1);
+						float tot = dr.getTotWorkingHours() + dr.getTotNonWorkingHours();
+						cell.setCellValue(EXCEL_EXPORTER_DEFAULT_NUMERIC_FORMATTER.format(tot));
+					} else {
+						cell.setCellValue("");
+					}
+					break;
+
+				case 28: // Codice fiscale
+					cell.setCellStyle(center);
+					cell.setCellValue(employee.getFiscalCode());
+					break;
+
+				case 29: // Sede
+					cell.setCellStyle(center);
+					cell.setCellValue(employee.getHeadquarters());
+					break;
+
+				case 30: // Matricola
+					cell.setCellStyle(center);
+					cell.setCellValue(employee.getEmployeeCode());
+					break;
+
+				case 31: // Livello
+					cell.setCellStyle(left);
+					cell.setCellValue(employee.getLevel());
+					break;
+
+				case 32: // Data nascita
+					cell.setCellStyle(center);
+					cell.setCellValue(employee.getBirthDate());
+					break;
+
+				case 33: // Data assunzione
+					cell.setCellStyle(center);
+					cell.setCellValue(employee.getHireDate());
+					break;
+
+				case 34: // Data cessazione
+					cell.setCellStyle(center);
+					cell.setCellValue(employee.getTerminationDate());
+					break;
+
+				default:
+					cell.setCellStyle(center);
+					cell.setCellValue("");
+					break;
+			}
+		};
+
+		// ============================================================
+		// CASO 1: ci sono presenze → comportamento normale
+		// ============================================================
+		if (dailyReports != null && !dailyReports.isEmpty()) {
+
+			for (DailyReport dailyReport : dailyReports) {
+
+				// Salta dimissioni
+				List<Pair<AbsenceType, Integer>> absences = dailyReport.getAbscenceMinutes();
+				if (absences != null && !absences.isEmpty()) {
+					Pair<AbsenceType, Integer> firstPair = absences.get(0);
+					if (firstPair != null && firstPair.getLeft() == AbsenceType.DIM) {
+						continue;
 					}
 				}
-			}
 
-			if (!NationalHolidays.isPublicHoliday(month, dailyReport.getDay(), year)) {
+				// Salta festivi
+				if (NationalHolidays.isPublicHoliday(month, dailyReport.getDay(), year)) {
+					continue;
+				}
 
 				Row row = sheet.createRow(startRow + counter.get());
 				row.setHeightInPoints(12);
 				counter.incrementAndGet();
 
-				// ------------------------------------------------------------
-				// 1) Pre-calcolo: somma minuti per colonna Excel (dinamico)
-				// ------------------------------------------------------------
+				// Pre-calcolo assenze
 				Map<Integer, Integer> absenceMinutesByColumn = new HashMap<>();
-
 				if (dailyReport.getAbscenceMinutes() != null) {
 					for (Pair<AbsenceType, Integer> pair : dailyReport.getAbscenceMinutes()) {
-
 						AbsenceType type = pair.getLeft();
 						Integer minutes = pair.getRight();
-
-						if (type == null || minutes == null || minutes <= 0) {
+						if (type == null || minutes == null || minutes <= 0)
 							continue;
+						Integer colIndex = COLUMN_MAP.get(type.getColumnName());
+						if (colIndex != null) {
+							absenceMinutesByColumn.merge(colIndex, minutes, Integer::sum);
 						}
-
-						String colLetter = type.getColumnName();
-						if (colLetter == null) {
-							continue;
-						}
-
-						Integer colIndex = COLUMN_MAP.get(colLetter);
-						if (colIndex == null) {
-							continue;
-						}
-
-						absenceMinutesByColumn.merge(colIndex, minutes, Integer::sum);
 					}
 				}
 
-				// ------------------------------------------------------------
-				// 2) Scrittura colonne
-				// ------------------------------------------------------------
+				// Scrittura celle
 				for (int column = 0; column < WorkbookInfo.SHEET_COLUMN_NAMES.length; column++) {
-					
-					Cell cell = row.createCell(column);
-					cell.setCellStyle(dataCellStyle);
 
-					// --- Se la colonna è una colonna di assenza, la gestiamo dinamicamente ---
+					Cell cell = row.createCell(column);
+
+					// Colonne assenze
 					if (absenceMinutesByColumn.containsKey(column)) {
-						int minutes = absenceMinutesByColumn.get(column);
-						cell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-						cell.setCellValue(minutes);
+						cell.setCellStyle(center);
+						cell.setCellValue(absenceMinutesByColumn.get(column));
 						continue;
 					}
 
-					// --- Altrimenti gestiamo le colonne NON assenze ---
-					switch (column) {
-
-						case 0: // Cognome
-							cell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
-							cell.setCellValue(employee.getSurname());
-							break;
-
-						case 1: // Nome
-							cell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
-							cell.setCellValue(employee.getName());
-							break;
-
-						case 2: // Giorno (data completa)
-							LocalDate date = LocalDate.of(year, month.getMonthInYear(), dailyReport.getDay());
-							cell.setCellValue(fullDayFormatter.format(date));
-							break;
-
-						case 3: // Presenza
-							cell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-							cell.setCellValue(dailyReport.isPresent() ? 1 : 0);
-							break;
-
-						case 25: // ore lavorate
-							cell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-							cell.setCellValue(EXCEL_EXPORTER_DEFAULT_NUMERIC_FORMATTER.format(
-									dailyReport.getTotWorkingHours()));
-							break;
-
-						case 26: // ore non lavorate
-							cell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-							cell.setCellValue(EXCEL_EXPORTER_DEFAULT_NUMERIC_FORMATTER.format(
-									dailyReport.getTotNonWorkingHours()));
-							break;
-
-						case 27: // Totale ore
-							float totHours = dailyReport.getTotWorkingHours() + dailyReport.getTotNonWorkingHours();
-							cell.getCellStyle().setAlignment(HorizontalAlignment.RIGHT);
-							cell.setCellValue(EXCEL_EXPORTER_DEFAULT_NUMERIC_FORMATTER.format(totHours));
-							break;
-
-						case 28: // Codice Fiscale
-							cell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
-							cell.setCellValue(employee.getFiscalCode());
-							break;
-
-						case 29: // Sede
-							cell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
-							cell.setCellValue(employee.getHeadquarters());
-							break;
-
-						case 30: // Matricola
-							cell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
-							cell.setCellValue(employee.getEmployeeCode());
-							break;
-
-						case 31: // Livello
-							cell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
-							cell.setCellValue(employee.getLevel());
-							break;
-
-						case 32: // Data di nascita
-							cell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
-							cell.setCellValue(employee.getBirthDate());
-							break;
-
-						case 33: // Data assunzione
-							cell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
-							cell.setCellValue(employee.getHireDate());
-							break;
-
-						case 34: // Data cessazione
-							cell.getCellStyle().setAlignment(HorizontalAlignment.LEFT);
-							cell.setCellValue(employee.getTerminationDate());
-							break;
-
-						default:
-							// tutte le altre colonne non usate rimangono vuote
-							cell.setCellValue("");
-							break;
-					}
+					writeCell.accept(cell, column);
 				}
 			}
-		});
 
+			return startRow + counter.get();
+		}
+
+		// ========================================================================
+		// CASO 2: nessuna presenza → Opzione C (una sola riga per il primo giorno)
+		// ========================================================================
+
+		Row row = sheet.createRow(startRow + counter.get());
+		row.setHeightInPoints(12);
+		counter.incrementAndGet();
+
+		for (int column = 0; column < WorkbookInfo.SHEET_COLUMN_NAMES.length; column++) {
+			Cell cell = row.createCell(column);
+			writeCell.accept(cell, column);
+		}
+
+/*
+		int daysInMonth = YearMonth.of(year, month.getMonthInYear()).lengthOfMonth();
+
+		for (int day = 1; day <= daysInMonth; day++) {
+
+			Row row = sheet.createRow(startRow + counter.get());
+			row.setHeightInPoints(12);
+			counter.incrementAndGet();
+
+			for (int column = 0; column < WorkbookInfo.SHEET_COLUMN_NAMES.length; column++) {
+				Cell cell = row.createCell(column);
+				writeCell.accept(cell, column);
+			}
+		}
+*/
 		return startRow + counter.get();
+	}
+
+	private CellStyle createLeftStyle(Workbook wb) {
+		CellStyle style = createDataCellStyle(wb);
+		style.setAlignment(HorizontalAlignment.LEFT);
+		return style;
+	}
+
+	private CellStyle createRightStyle(Workbook wb) {
+		CellStyle style = createDataCellStyle(wb);
+		style.setAlignment(HorizontalAlignment.RIGHT);
+		return style;
+	}
+
+	private CellStyle createCenterStyle(Workbook wb) {
+		CellStyle style = createDataCellStyle(wb);
+		style.setAlignment(HorizontalAlignment.CENTER);
+		return style;
 	}
 
 	private CellStyle createHeaderStyle(@NonNull Workbook wb) {

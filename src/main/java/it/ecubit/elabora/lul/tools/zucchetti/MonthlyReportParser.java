@@ -1,5 +1,7 @@
 package it.ecubit.elabora.lul.tools.zucchetti;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -15,7 +17,7 @@ import it.ecubit.elabora.lul.tools.model.Company;
 import it.ecubit.elabora.lul.tools.model.DailyReport;
 import it.ecubit.elabora.lul.tools.model.Employee;
 import it.ecubit.elabora.lul.tools.model.MonthlyReport;
-
+import it.ecubit.elabora.lul.tools.utils.FiscalCodeParser;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
@@ -38,7 +40,6 @@ public class MonthlyReportParser {
             return parsePageTypeB(lines);
         }
 
-        // Pagina rumore → restituiamo un MonthlyReport vuoto
         MonthlyReport empty = new MonthlyReport();
         empty.setEmployee(new Employee());
         return empty;
@@ -56,7 +57,8 @@ public class MonthlyReportParser {
 
     private boolean isPageTypeB(String[] lines) {
         return Arrays.stream(lines).anyMatch(l -> l.contains("Filiale/Dipendenza") ||
-                l.startsWith("Sede di "));
+                l.startsWith("Sede di ") ||
+                l.contains("PERIODOsDIsRETRIBUZIONE"));
     }
 
     // ======================================================
@@ -66,11 +68,25 @@ public class MonthlyReportParser {
 
         MonthlyReport result = new MonthlyReport();
         Employee employee = new Employee();
+        Company company = new Company();
+
+        boolean nextCompanyName = false;
+        boolean nextCompanyAddress = false;
+        boolean nextCompanyCap = false;
 
         boolean nextIsHeadquartersCode = false;
+        boolean nextIsEmployeeName = false;
         boolean nextIsEmployeeCode = false;
         boolean nextIsLevel = false;
         boolean nextIsDates = false;
+
+        boolean nextIsPeriod = false;
+        int periodScanCount = 0;
+
+        boolean headquartersFound = false;
+
+        String rawEmployeeFullName = null;
+        String fiscalCode = null;
 
         for (String raw : lines) {
 
@@ -78,20 +94,104 @@ public class MonthlyReportParser {
             if (s.isEmpty())
                 continue;
 
-            // --- SEDE TESTUALE ---
-            if (isHeadquartersText(s)) {
-                employee.setHeadquarters(
-                        s.substring("Sede di".length()).trim());
+            // ============================================================
+            // COMPANY NAME
+            // ============================================================
+            if (s.contains("CodicesAzienda RagionesSociale")) {
+                nextCompanyName = true;
                 continue;
             }
 
-            // --- HEADER CODICE SEDE ---
+            if (nextCompanyName) {
+                String[] parts = s.split(" ", 2);
+                if (parts.length == 2) {
+                    company.setName(parts[1].trim());
+                }
+                nextCompanyName = false;
+                continue;
+            }
+
+            // ============================================================
+            // COMPANY ADDRESS
+            // ============================================================
+            if (s.equals("Indirizzo")) {
+                nextCompanyAddress = true;
+                continue;
+            }
+
+            if (nextCompanyAddress) {
+                company.setAddress(s);
+                nextCompanyAddress = false;
+                nextCompanyCap = true;
+                continue;
+            }
+
+            if (nextCompanyCap && s.matches("^\\d{5}.*")) {
+                company.setAddress(company.getAddress() + ", " + s);
+                nextCompanyCap = false;
+                continue;
+            }
+
+            // ============================================================
+            // PERIODO (robusto)
+            // ============================================================
+            if (s.contains("PERIODOsDIsRETRIBUZIONE")) {
+                nextIsPeriod = true;
+                periodScanCount = 0;
+                continue;
+            }
+
+            if (nextIsPeriod) {
+
+                String[] parts = s.trim().split("\\s+");
+
+                if (parts.length >= 2 && Month.isValidMonth(parts[0])) {
+                    Month month = Month.of(parts[0]);
+                    int year = Integer.parseInt(parts[1]);
+                    result.setMonth(month);
+                    result.setYear(year);
+                    nextIsPeriod = false;
+                    continue;
+                }
+
+                periodScanCount++;
+                if (periodScanCount >= 3) {
+                    nextIsPeriod = false;
+                }
+
+                continue;
+            }
+
+            // ============================================================
+            // SEDE TESTUALE ("Sede di Bari")
+            // ============================================================
+            if (!headquartersFound && isHeadquartersText(s)) {
+                employee.setHeadquarters(
+                        s.substring("Sede di".length()).trim());
+                headquartersFound = true;
+                continue;
+            }
+
+            // ============================================================
+            // SEDE ABBREVIATA (Bari, Rende, Centro)
+            // ============================================================
+            if (!headquartersFound && isLikelyCity(s)) {
+                employee.setHeadquarters(s.trim());
+                headquartersFound = true;
+                continue;
+            }
+
+            // ============================================================
+            // HEADER CODICE SEDE
+            // ============================================================
             if (isHeadquartersCodeHeader(s)) {
                 nextIsHeadquartersCode = true;
                 continue;
             }
 
-            // --- CODICE SEDE ---
+            // ============================================================
+            // CODICE SEDE
+            // ============================================================
             if (nextIsHeadquartersCode) {
 
                 if (s.matches("\\d{6,12}")) {
@@ -102,50 +202,66 @@ public class MonthlyReportParser {
                 continue;
             }
 
-            // --- HEADER CODICE DIPENDENTE ---
+            // ============================================================
+            // EMPLOYEE NAME
+            // ============================================================
             if (s.contains("Codicesdipendente")) {
-                nextIsEmployeeCode = true; // da qui in poi cerchiamo la prima riga numerica
+                nextIsEmployeeName = true;
                 continue;
             }
 
-            // --- RIGA CODICE DIPENDENTE (prima riga che inizia con cifra) ---
+            if (nextIsEmployeeName) {
+                rawEmployeeFullName = s.trim();
+                nextIsEmployeeName = false;
+                nextIsEmployeeCode = true;
+                continue;
+            }
+
+            // ============================================================
+            // EMPLOYEE CODE + FISCAL CODE
+            // ============================================================
             if (nextIsEmployeeCode) {
 
-                // se NON inizia con cifra → salta
                 if (!s.matches("^\\d+.*")) {
                     continue;
                 }
 
-                // qui siamo sulla riga tipo: "0000009 RRGBBR68T49H501K"
                 String[] parts = s.split("\\s+");
-                if (parts.length >= 1) {
-                    employee.setEmployeeCode(parts[0]); // 0000009
-                }
+                if (parts.length >= 1)
+                    employee.setEmployeeCode(parts[0]);
+                if (parts.length >= 2)
+                    fiscalCode = parts[1];
 
                 nextIsEmployeeCode = false;
                 continue;
             }
 
-            // --- HEADER DATE ---
+            // ============================================================
+            // LEVEL
+            // ============================================================
             if (s.contains("DatasdisNascita")) {
                 nextIsLevel = true;
                 continue;
             }
 
-            // --- LIVELLO ---
             if (nextIsLevel) {
-                employee.setLevel(s.trim()); // IMP A1
+                employee.setLevel(s.trim());
                 nextIsLevel = false;
                 nextIsDates = true;
                 continue;
             }
 
-            // --- DATE ---
+            // ============================================================
+            // DATES
+            // ============================================================
             if (nextIsDates) {
                 String[] parts = s.split("\\s+");
 
-                if (parts.length >= 1)
-                    employee.setBirthDate(parts[0]);
+                /*
+                 * employee.setBirthDate ora è gestita dalla funzione parseEmployeeName
+                 * if (parts.length >= 1)
+                 * employee.setBirthDate(parts[0]);
+                 */
                 if (parts.length >= 2)
                     employee.setHireDate(parts[1]);
                 if (parts.length >= 3)
@@ -156,8 +272,18 @@ public class MonthlyReportParser {
             }
         }
 
+        // ============================================================
+        // PARSING NOME + COGNOME SOLO ORA CHE ABBIAMO IL CF
+        // ============================================================
+        if (rawEmployeeFullName != null && fiscalCode != null) {
+            parseEmployeeName(rawEmployeeFullName, fiscalCode, employee);
+            employee.setFiscalCode(fiscalCode);
+        }
+
+        employee.setCompany(company);
         result.setEmployee(employee);
         return result;
+
     }
 
     // ======================================================
@@ -256,12 +382,12 @@ public class MonthlyReportParser {
     }
 
     private ParserStatus handleEmployeeStart(String s, ParserContext ctx) {
-        parseEmployeeName(s, ctx.employee);
+        ctx.rawEmployeeFullName = s; // memorizziamo il nome grezzo
         return ParserStatus.EMPLOYEE_PARSING;
     }
 
     // ======================================================
-    // NUOVA LOGICA ADDRESS DIPENDENTE (corretta)
+    // NUOVA LOGICA ADDRESS DIPENDENTE
     // ======================================================
     private ParserStatus handleEmployeeParsing(String s, ParserContext ctx) {
 
@@ -285,7 +411,30 @@ public class MonthlyReportParser {
     }
 
     private ParserStatus handleMonthYear(String s, ParserContext ctx) {
-        ctx.employee.setFiscalCode(s.split(" ")[0]);
+
+        // ============================================================
+        // 1) Estrazione codice fiscale (come prima, ma più robusta)
+        // ============================================================
+        // Prima logica: CF = primo token della riga
+        String[] tokens = s.split("\\s+");
+        if (tokens.length > 0) {
+            String fiscalCode = tokens[0].trim();
+            ctx.employee.setFiscalCode(fiscalCode);
+
+            // ============================================================
+            // 2) Ora che abbiamo il CF, possiamo parsare il nome completo
+            // ============================================================
+            if (ctx.rawEmployeeFullName != null && !ctx.rawEmployeeFullName.isBlank()) {
+                parseEmployeeName(
+                        ctx.rawEmployeeFullName,
+                        fiscalCode,
+                        ctx.employee);
+            }
+        }
+
+        // ============================================================
+        // 3) Ritorna allo stato originale della tua macchina
+        // ============================================================
         return ParserStatus.NO_DATA;
     }
 
@@ -317,29 +466,68 @@ public class MonthlyReportParser {
         ctx.result.setWorkContractType(contract.toString().trim());
     }
 
-    private void parseEmployeeName(String fullName, Employee employee) {
+    private void parseEmployeeName(String fullName, String fiscalCode, Employee employee) {
 
-        String[] parts = fullName.split("\\s+");
-        String name = "";
-        String surname = "";
-
-        if (fullName.toLowerCase().startsWith("di ") && parts.length > 2) {
-            surname = parts[0] + " " + parts[1];
-            for (int i = 2; i < parts.length; i++)
-                name += " " + parts[i];
-
-        } else if (parts.length > 2) {
-            surname = parts[0];
-            for (int i = 1; i < parts.length; i++)
-                name += " " + parts[i];
-
-        } else {
-            surname = parts[0];
-            name = parts[1];
+        if (fullName == null || fullName.isBlank()) {
+            employee.setSurname("");
+            employee.setName("");
+            return;
         }
 
-        employee.setName(name.trim());
-        employee.setSurname(surname.trim());
+        String[] parts = fullName.trim().split("\\s+");
+        if (parts.length == 1) {
+            employee.setSurname(parts[0]);
+            employee.setName("");
+            return;
+        }
+
+        // --- Estrai consonanti dal CF ---
+        FiscalCodeParser parser = new FiscalCodeParser(fiscalCode);
+        String cfSurname = parser.getSurnameConsonants(); // prime 3 consonanti
+        String cfName = parser.getNameConsonants(); // successive 3 consonanti
+
+        String bestSurname = parts[0];
+        String bestName = String.join(" ", Arrays.copyOfRange(parts, 1, parts.length));
+        int bestScore = -1;
+
+        // --- Prova tutte le possibili divisioni ---
+        for (int split = 1; split < parts.length; split++) {
+
+            String surnameCandidate = String.join(" ", Arrays.copyOfRange(parts, 0, split));
+            String nameCandidate = String.join(" ", Arrays.copyOfRange(parts, split, parts.length));
+
+            String surnameCons = extractConsonants(surnameCandidate);
+            String nameCons = extractConsonants(nameCandidate);
+
+            int score = matchScore(surnameCons, cfSurname) +
+                    matchScore(nameCons, cfName);
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestSurname = surnameCandidate;
+                bestName = nameCandidate;
+            }
+        }
+
+        employee.setSurname(bestSurname.trim());
+        employee.setName(bestName.trim());
+
+        LocalDate birth = parser.getBirthDate();
+        String formatted = birth.format(DateTimeFormatter.ofPattern("dd-MM-yyyy"));
+        employee.setBirthDate(formatted);
+    }
+
+    private String extractConsonants(String s) {
+        return s.replaceAll("(?i)[^BCDFGHJKLMNPQRSTVWXYZ]", "").toUpperCase();
+    }
+
+    private int matchScore(String extracted, String cfPart) {
+        int score = 0;
+        for (int i = 0; i < Math.min(extracted.length(), cfPart.length()); i++) {
+            if (extracted.charAt(i) == cfPart.charAt(i))
+                score++;
+        }
+        return score;
     }
 
     private void parseDailyReport(String s, ParserContext ctx) {
@@ -441,6 +629,31 @@ public class MonthlyReportParser {
         return s.toLowerCase().startsWith("sede di ");
     }
 
+    private boolean isLikelyCity(String s) {
+
+        // Esclude stringhe con spazi (es. "Santa Maria")
+        if (s.contains(" "))
+            return false;
+
+        // Esclude numeri
+        if (s.matches(".*\\d.*"))
+            return false;
+
+        // Esclude orari tipo "17:48"
+        if (s.matches("^\\d{1,2}:\\d{2}$"))
+            return false;
+
+        // Deve essere capitalizzata come un nome di città
+        if (!s.matches("^[A-Z][a-zàèéìòù]+$"))
+            return false;
+
+        // Lunghezza ragionevole
+        if (s.length() < 3 || s.length() > 20)
+            return false;
+
+        return true;
+    }
+
     // ======================================================
     // CONTEXT CLASS
     // ======================================================
@@ -448,5 +661,7 @@ public class MonthlyReportParser {
         public final MonthlyReport result = new MonthlyReport();
         public final Employee employee = new Employee();
         public final Company company = new Company();
+
+        public String rawEmployeeFullName; // <--- aggiunto
     }
 }

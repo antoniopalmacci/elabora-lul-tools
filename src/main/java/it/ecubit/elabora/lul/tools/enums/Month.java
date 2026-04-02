@@ -29,23 +29,29 @@ public enum Month {
 		this.monthInYear = monthInYear;
 	}
 
-    public static Month of(@NonNull String monthStr) throws NoSuchElementException {
-        for(Month month: values()) {
-            if(
-            	monthStr.equalsIgnoreCase(month.name()) ||
-            	monthStr.equalsIgnoreCase(month.getAbbreviation()) ||
-            	monthStr.equalsIgnoreCase(month.getName()) ||
-            	monthStr.equals(String.valueOf(month.getMonthInYear()))
-            ) {
-                return month;
-            }
-        }
-        throw new NoSuchElementException(String.format("Mese non riconosciuto: %s", monthStr));
-    }
+	public static Month of(@NonNull String monthStr) throws NoSuchElementException {
+		for (Month month : values()) {
+			if (monthStr.equalsIgnoreCase(month.name()) ||
+					monthStr.equalsIgnoreCase(month.getAbbreviation()) ||
+					monthStr.equalsIgnoreCase(month.getName()) ||
+					monthStr.equals(String.valueOf(month.getMonthInYear()))) {
+				return month;
+			}
+		}
+		throw new NoSuchElementException(String.format("Mese non riconosciuto: %s", monthStr));
+	}
 
-    public String toString() {
-    	return this.name;
-    }
+	public String toString() {
+		return this.name;
+	}
 
+	public static boolean isValidMonth(String s) {
+		try {
+			Month.of(s);
+			return true;
+		} catch (Exception e) {
+			return false;
+		}
+	}
 
 }

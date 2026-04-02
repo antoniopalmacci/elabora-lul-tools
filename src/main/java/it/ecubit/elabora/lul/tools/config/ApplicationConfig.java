@@ -15,7 +15,6 @@ import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.ComponentScan;
-import org.springframework.util.StringUtils;
 
 import it.ecubit.elabora.lul.tools.exporter.ExcelLulExporter;
 import it.ecubit.elabora.lul.tools.model.Employee;
@@ -43,70 +42,6 @@ public class ApplicationConfig implements CommandLineRunner {
 		SpringApplication.run(ApplicationConfig.class, args);
 	}
 
-	/*
-	 * @Override
-	 * public void run(String... args) {
-	 * int numArgs = args.length;
-	 * if (numArgs < 1) {
-	 * log.
-	 * error("Missing arguments: at least PDF report filename should be specified as argument"
-	 * );
-	 * log.error(
-	 * "Usage: java -jar <ELABORA TOOLS JAR> <PDF REPORT FILENAME> (-o <OUTPUT DIR>). The -o argument is optional and defaults to the directory in which PDF resides."
-	 * );
-	 * }
-	 * try {
-	 * String pdfPath = args[0];
-	 * PdfDocumentInfo docInfo = pdfReportParser.inspect(pdfPath);
-	 * log.info("PDF document info:\n" + docInfo.toString());
-	 * List<String> pages = pdfReportParser.extractTextFromAllPages(pdfPath);
-	 * log.info(String.format("Extracted text content from %d pages",
-	 * pages.size()));
-	 * int pageIndex = 1;
-	 * Map<String, List<MonthlyReport>> reportsForMonthMap = new HashMap<>();
-	 * for (String page : pages) {
-	 * try {
-	 * MonthlyReport monthlyReport = pdfReportParser.parsePageContent(page);
-	 * String employeeNameSurname = monthlyReport.getEmployee().getName() + " "
-	 * + monthlyReport.getEmployee().getSurname();
-	 * String englishMonthName =
-	 * StringUtils.capitalize(monthlyReport.getMonth().getName().toLowerCase());
-	 * log.info(String.
-	 * format("Loaded %s monthly report for employee %s from page %d",
-	 * englishMonthName,
-	 * employeeNameSurname, pageIndex));
-	 * String key = monthlyReport.getMonth() + " " + monthlyReport.getYear();
-	 * if (!reportsForMonthMap.containsKey(key)) {
-	 * reportsForMonthMap.put(key, new ArrayList<>());
-	 * }
-	 * reportsForMonthMap.get(key).add(monthlyReport);
-	 * 
-	 * 
-	 * pageIndex += 1;
-	 * } catch (Exception exc) {
-	 * log.error("Unable to parse monthly report from page: " + exc.getMessage());
-	 * }
-	 * }
-	 * 
-	 * Path exportDirPath = Paths.get(docInfo.getFilename()).getParent();
-	 * if (numArgs >= 3 && args[1].equalsIgnoreCase("-o")) {
-	 * exportDirPath = Paths.get(args[2]);
-	 * }
-	 * exportDirPath.toFile().mkdirs();
-	 * String pdfFilename =
-	 * Paths.get(docInfo.getFilename()).getFileName().toString();
-	 * String excelFilename = "Lul-" + FilenameUtils.removeExtension(pdfFilename) +
-	 * ".xlsx";
-	 * log.info(String.format("Exporting data to %s Excel LUL template in dir %s",
-	 * excelFilename,
-	 * exportDirPath.toString()));
-	 * excelLulExporter.export(reportsForMonthMap, exportDirPath, excelFilename);
-	 * log.info("Done! Export completed successfully");
-	 * } catch (IOException ioExc) {
-	 * log.error("IOException occurred", ioExc);
-	 * }
-	 * }
-	 */
 	@Override
 	public void run(String... args) {
 		int numArgs = args.length;
@@ -129,8 +64,12 @@ public class ApplicationConfig implements CommandLineRunner {
 			Map<String, List<MonthlyReport>> reportsForMonthMap = new HashMap<>();
 
 			MonthlyReport currentReport = null;
+			boolean lastWasPageA = false;
+			String lastFiscalCodeForPageB = null;
 
 			for (String page : pages) {
+
+				// --- IGNORA LE PAGINE DI RIEPILOGO GENERALE ---
 				if (page.contains("RIEPILOGO GENERALE")) {
 					log.info(String.format("Skipping summary page %d (RIEPILOGO GENERALE)", pageIndex));
 					pageIndex++;
@@ -139,19 +78,20 @@ public class ApplicationConfig implements CommandLineRunner {
 
 				try {
 					MonthlyReport partial = monthlyReportParser.parsePageContent(page);
-					// --- IGNORA LE PAGINE DI RIEPILOGO GENERALE ---
 					Employee pe = partial.getEmployee();
 
 					boolean isPageA = pe != null && pe.getId() != null;
-					boolean isPageB = !isPageA && pe != null; // Page B ha employee ma senza ID
+					boolean isPageB = pe != null && pe.getId() == null;
 
-					// ============================
-					// PAGE TYPE A → NUOVO CEDOLINO
-					// ============================
+					// ==============================================================================================
+					// PAGE TYPE A → NUOVO CEDOLINO → pagina presenze
+					// Inizializziamo i campi id, name, surname, address, cap, fiscalCode e company
+					// dell'employee;
+					// ==============================================================================================
 					if (isPageA) {
 
-						// chiudi il cedolino precedente
-						if (currentReport != null) {
+						// chiudi il precedente
+						if (currentReport != null && currentReport.getMonth() != null) {
 							String key = currentReport.getMonth() + " " + currentReport.getYear();
 							reportsForMonthMap
 									.computeIfAbsent(key, k -> new ArrayList<>())
@@ -159,64 +99,115 @@ public class ApplicationConfig implements CommandLineRunner {
 						}
 
 						currentReport = partial;
-
-						String employeeNameSurname = currentReport.getEmployee().getName() + " " +
-								currentReport.getEmployee().getSurname();
-						String englishMonthName = StringUtils.capitalize(
-								currentReport.getMonth().getName().toLowerCase());
+						lastWasPageA = true;
 
 						log.info(String.format(
-								"Loaded %s monthly report for employee %s from page %d (PageTypeA)",
-								englishMonthName,
-								employeeNameSurname,
+								"Loaded monthly report for employee %s %s from page %d (Page Type A)",
+								currentReport.getEmployee().getSurname(),
+								currentReport.getEmployee().getName(),
 								pageIndex));
+
+						pageIndex++;
+						continue;
 					}
 
-					// ==========================================
-					// PAGE TYPE B → ARRICCHISCE IL CEDOLINO CORRENTE
-					// ==========================================
-					if (isPageB && currentReport != null) {
+					// ==============================================================================================
+					// PAGE TYPE B → pagina busta paga
+					// ==============================================================================================
+					if (isPageB) {
 
-						Employee target = currentReport.getEmployee();
+						// --- Nuova regola: ignora pagine B duplicate dello stesso dipendente ---
+						boolean isSameEmployeeAsPreviousB = !lastWasPageA &&
+								lastFiscalCodeForPageB != null &&
+								pe.getFiscalCode() != null &&
+								pe.getFiscalCode().equalsIgnoreCase(lastFiscalCodeForPageB);
 
-						if (pe.getHeadquarters() != null)
-							target.setHeadquarters(pe.getHeadquarters());
+						if (isSameEmployeeAsPreviousB) {
+							log.info(String.format(
+									"Skipping duplicate Page Type B for employee %s %s (page %d)",
+									pe.getSurname(), pe.getName(), pageIndex));
+							pageIndex++;
+							continue;
+						}
 
-						if (pe.getEmployeeCode() != null)
-							target.setEmployeeCode(pe.getEmployeeCode());
+						// aggiorna il codice fiscale dell’ultima pagina B valida
+						lastFiscalCodeForPageB = pe.getFiscalCode();
 
-						if (pe.getLevel() != null)
-							target.setLevel(pe.getLevel());
+						// ==============================================================================================
+						// Caso 1: la pagina busta paga segue la pagina presenze dello stesso dipendente
+						// In questo caso arricchisce l'employee, già inizializzato in PAGE A, con i campi mancanti
+						// (headquarters, employeeCode, level, birthDate, hireDate, terminationDate)
+						// ==============================================================================================
+						if (lastWasPageA && currentReport != null) {
 
-						if (pe.getBirthDate() != null)
-							target.setBirthDate(pe.getBirthDate());
+							Employee target = currentReport.getEmployee();
 
-						if (pe.getHireDate() != null)
-							target.setHireDate(pe.getHireDate());
+							if (pe.getHeadquarters() != null)
+								target.setHeadquarters(pe.getHeadquarters());
 
-						if (pe.getTerminationDate() != null)
-							target.setTerminationDate(pe.getTerminationDate());
+							if (pe.getEmployeeCode() != null)
+								target.setEmployeeCode(pe.getEmployeeCode());
 
+							if (pe.getLevel() != null)
+								target.setLevel(pe.getLevel());
+
+							if (pe.getBirthDate() != null)
+								target.setBirthDate(pe.getBirthDate());
+
+							if (pe.getHireDate() != null)
+								target.setHireDate(pe.getHireDate());
+
+							if (pe.getTerminationDate() != null)
+								target.setTerminationDate(pe.getTerminationDate());
+
+							lastWasPageA = false;
+							pageIndex++;
+							continue;
+						}
+
+						// ==============================================================================================
+						// Caso 2: la pagina busta paga segue un'altra busta paga di un diverso dipendente
+						// In questo caso crea un nuovo emplyee id e inizializza solo i campi name, surname, fiscalCode,
+						// company, headquarters, employeeCode, level, birthDate, hireDate, terminationDate dell'employee
+						// ==============================================================================================
+						if (!lastWasPageA) {
+
+							// chiudi il precedente
+							if (currentReport != null && currentReport.getMonth() != null) {
+								String key = currentReport.getMonth() + " " + currentReport.getYear();
+								reportsForMonthMap
+										.computeIfAbsent(key, k -> new ArrayList<>())
+										.add(currentReport);
+							}
+
+							currentReport = partial;
+							lastWasPageA = false;
+
+							log.info(String.format(
+									"Loaded monthly report for employee %s %s from page %d (Page Type B without A)",
+									currentReport.getEmployee().getSurname(),
+									currentReport.getEmployee().getName(),
+									pageIndex));
+
+							pageIndex++;
+							continue;
+						}
 					}
 
 				} catch (Exception exc) {
 					log.error("Unable to parse monthly report from page " + pageIndex + ": " + exc.getMessage());
+					pageIndex++;
 				}
-
-				pageIndex += 1;
 			}
 
 			// chiudi l’ultimo cedolino se presente
-			if (currentReport != null) {
+			if (currentReport != null && currentReport.getMonth() != null) {
 				String key = currentReport.getMonth() + " " + currentReport.getYear();
 				reportsForMonthMap
 						.computeIfAbsent(key, k -> new ArrayList<>())
 						.add(currentReport);
 			}
 
-			// ============================
-			// EXPORT
-			// ============================
 			Path exportDirPath = Paths.get(docInfo.getFilename()).getParent();
 			if (numArgs >= 3 && args[1].equalsIgnoreCase("-o")) {
 				exportDirPath = Paths.get(args[2]);
@@ -235,40 +226,5 @@ public class ApplicationConfig implements CommandLineRunner {
 		} catch (IOException ioExc) {
 			log.error("IOException occurred", ioExc);
 		}
-	}
-
-	private MonthlyReport mergeReports(List<MonthlyReport> partials) {
-
-		MonthlyReport finalReport = new MonthlyReport();
-		Employee employee = new Employee();
-
-		for (MonthlyReport partial : partials) {
-
-			Employee pe = partial.getEmployee();
-
-			// PageTypeA → copia tutto tranne headquarters
-			if (pe.getId() != null) {
-				employee.setId(pe.getId());
-				employee.setName(pe.getName());
-				employee.setSurname(pe.getSurname());
-				employee.setAddress(pe.getAddress());
-				employee.setCap(pe.getCap());
-				employee.setFiscalCode(pe.getFiscalCode());
-				employee.setCompany(pe.getCompany());
-
-				finalReport.setMonth(partial.getMonth());
-				finalReport.setYear(partial.getYear());
-				finalReport.setWorkContractType(partial.getWorkContractType());
-				finalReport.setDailyReports(partial.getDailyReports());
-			}
-
-			// PageTypeB → copia solo headquarters
-			if (pe.getHeadquarters() != null) {
-				employee.setHeadquarters(pe.getHeadquarters());
-			}
-		}
-
-		finalReport.setEmployee(employee);
-		return finalReport;
 	}
 }
