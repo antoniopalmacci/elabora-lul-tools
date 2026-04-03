@@ -4,7 +4,8 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
+
+import javax.swing.JOptionPane;
 
 import org.apache.commons.lang3.tuple.Pair;
 import org.springframework.stereotype.Component;
@@ -18,6 +19,7 @@ import it.ecubit.elabora.lul.tools.model.DailyReport;
 import it.ecubit.elabora.lul.tools.model.Employee;
 import it.ecubit.elabora.lul.tools.model.MonthlyReport;
 import it.ecubit.elabora.lul.tools.utils.FiscalCodeParser;
+import it.ecubit.elabora.lul.tools.utils.NationalHolidays;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
@@ -46,7 +48,7 @@ public class MonthlyReportParser {
     }
 
     // ======================================================
-    // PAGE TYPE DETECTION (rafforzato)
+    // PAGE TYPE DETECTION
     // ======================================================
     private boolean isPageTypeA(String[] lines) {
         return Arrays.stream(lines).anyMatch(l -> l.contains("AZIENDA") ||
@@ -387,7 +389,7 @@ public class MonthlyReportParser {
     }
 
     // ======================================================
-    // NUOVA LOGICA ADDRESS DIPENDENTE
+    // LOGICA ADDRESS DIPENDENTE
     // ======================================================
     private ParserStatus handleEmployeeParsing(String s, ParserContext ctx) {
 
@@ -532,54 +534,113 @@ public class MonthlyReportParser {
 
     private void parseDailyReport(String s, ParserContext ctx) {
 
-        String[] info = s.split("\\s+");
+        String[] info = s.trim().split("\\s+");
+        if (info.length < 2)
+            return;
 
         WeekDay weekDay = WeekDay.of(info[0]);
         int day = Integer.parseInt(info[1]);
+
+        Month month = ctx.result.getMonth();
+        int year = ctx.result.getYear();
 
         DailyReport dr = new DailyReport();
         dr.setDay(day);
         dr.setWeekDay(weekDay);
         dr.setAbscenceMinutes(new ArrayList<>());
 
-        if (info.length >= 3)
-            parseDailyElement(info[2], dr, weekDay);
-        if (info.length >= 4)
-            parseDailyElement(info[3], dr, weekDay);
-        if (info.length >= 5)
-            parseDailyElement(info[4], dr, weekDay);
+        // FESTIVO?
+        boolean holiday = NationalHolidays.isPublicHoliday(month, day, year);
 
-        if (info.length >= 6 && isNumber(info[5])) {
-            List<Pair<AbsenceType, Integer>> list = dr.getAbscenceMinutes();
-            AbsenceType type = list.get(list.size() - 1).getLeft();
-            list.add(Pair.of(type, getMinutes(info[5])));
+        int index = 2;
+
+        // Primo numero → ordinarie (feriale) oppure straordinarie (festivo)
+        if (index < info.length && isNumber(info[index])) {
+            int minutes = getMinutes(info[index]);
+
+            if (holiday) {
+                dr.setExtraWorkAttendanceMinutes(
+                        Pair.of(WorkAttendanceType.FESTIVA, minutes));
+            } else {
+                dr.setOrdinaryWorkAttendanceMinutes(
+                        Pair.of(WorkAttendanceType.ORDINARIA, minutes));
+            }
+
+            index++;
+        }
+
+        // Secondo numero → straordinarie (solo se NON festivo)
+        if (!holiday && index < info.length && isNumber(info[index])) {
+            int minutes = getMinutes(info[index]);
+            dr.setExtraWorkAttendanceMinutes(
+                    Pair.of(WorkAttendanceType.STRAORDINARIA, minutes));
+            index++;
+        }
+
+        // Coppie assenze (codice + ore)
+        while (index + 1 < info.length) {
+
+            String code = info[index];
+            String value = info[index + 1];
+
+            // Gestione "ON" (Orario Notturno) → NON è un'assenza
+            if (code.equalsIgnoreCase("ON")) {
+
+                if (isNumber(value)) {
+                    int minutes = getMinutes(value);
+                    dr.setExtraWorkAttendanceMinutes(
+                            Pair.of(WorkAttendanceType.STRAORDINARIA, minutes));
+                } else {
+                    JOptionPane.showMessageDialog(
+                            null,
+                            "Valore minuti non valido per codice ON (orario notturno): " + value +
+                                    "\nDipendente: " + ctx.rawEmployeeFullName +
+                                    "\nRiga: " + String.join(" ", info),
+                            "Errore nel parsing",
+                            JOptionPane.ERROR_MESSAGE);
+                }
+
+                index += 2;
+                continue; // passa alla prossima coppia
+            }
+
+            // Gestione assenze normali
+            AbsenceType type;
+
+            try {
+                type = AbsenceType.of(code);
+            } catch (Exception e) {
+
+                JOptionPane.showMessageDialog(
+                        null,
+                        "Codice assenza non riconosciuto: " + code +
+                                "\nDipendente: " + ctx.rawEmployeeFullName +
+                                "\nRiga: " + String.join(" ", info),
+                        "Errore nel parsing",
+                        JOptionPane.ERROR_MESSAGE);
+
+                break; // interrompe il parsing delle assenze
+            }
+
+            // Valore minuti valido?
+            if (isNumber(value)) {
+                dr.getAbscenceMinutes().add(
+                        Pair.of(type, getMinutes(value)));
+            } else {
+                JOptionPane.showMessageDialog(
+                        null,
+                        "Valore minuti non valido per il codice assenza: " + code +
+                                "\nValore trovato: " + value +
+                                "\nDipendente: " + ctx.rawEmployeeFullName +
+                                "\nRiga: " + String.join(" ", info),
+                        "Errore nel parsing",
+                        JOptionPane.ERROR_MESSAGE);
+            }
+
+            index += 2;
         }
 
         ctx.result.addDailyReport(dr);
-    }
-
-    private void parseDailyElement(String element, DailyReport dr, WeekDay weekDay) {
-
-        if (isNumber(element)) {
-
-            if (!dr.getAbscenceMinutes().isEmpty()) {
-                List<Pair<AbsenceType, Integer>> list = dr.getAbscenceMinutes();
-                AbsenceType type = list.get(list.size() - 1).getLeft();
-                list.add(Pair.of(type, getMinutes(element)));
-
-            } else if (weekDay == WeekDay.SATURDAY || weekDay == WeekDay.SUNDAY) {
-                dr.setOrdinaryWorkAttendanceMinutes(
-                        Pair.of(WorkAttendanceType.FESTIVA, getMinutes(element)));
-
-            } else {
-                dr.setOrdinaryWorkAttendanceMinutes(
-                        Pair.of(WorkAttendanceType.ORDINARIA, getMinutes(element)));
-            }
-
-        } else {
-            AbsenceType type = AbsenceType.of(element);
-            dr.getAbscenceMinutes().add(Pair.of(type, 0));
-        }
     }
 
     // ======================================================
@@ -597,11 +658,7 @@ public class MonthlyReportParser {
     }
 
     private boolean startsWithWeekDayNum(@NonNull String line) {
-        if (line.length() > 4) {
-            String prefix = line.substring(0, 4);
-            return ParserPattern.WEEK_DAY_NUM_PATTERN.matcher(prefix).matches();
-        }
-        return false;
+        return ParserPattern.WEEK_DAY_NUM_PATTERN.matcher(line.trim()).find();
     }
 
     private boolean isNumber(String s) {

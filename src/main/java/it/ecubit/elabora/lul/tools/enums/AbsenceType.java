@@ -22,7 +22,6 @@ public enum AbsenceType {
 	DS("DS", "Donazione sangue", "O"),
 	MAT("MT", "Maternità obbligatoria", "P"),
 	ALL("AL", "Allattamento", "P"),
-	NOT("ON", "Orario notturno", "R"),
 	SC("SC", "Sciopero", "S"),
 	CM("CM", "Congedo matrimoniale", "T"),
 	L104("PH", "Assenza legge 104", "U"),

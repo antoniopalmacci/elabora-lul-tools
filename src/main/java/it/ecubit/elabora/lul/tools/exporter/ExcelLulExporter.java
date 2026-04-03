@@ -5,7 +5,6 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Path;
-import java.text.DecimalFormat;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -18,6 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.poi.ss.usermodel.BorderStyle;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellStyle;
+import org.apache.poi.ss.usermodel.DataFormat;
 import org.apache.poi.ss.usermodel.FillPatternType;
 import org.apache.poi.ss.usermodel.Font;
 import org.apache.poi.ss.usermodel.HorizontalAlignment;
@@ -37,17 +37,26 @@ import it.ecubit.elabora.lul.tools.enums.Month;
 import it.ecubit.elabora.lul.tools.model.DailyReport;
 import it.ecubit.elabora.lul.tools.model.Employee;
 import it.ecubit.elabora.lul.tools.model.MonthlyReport;
-import it.ecubit.elabora.lul.tools.utils.NationalHolidays;
-
+import it.ecubit.elabora.lul.tools.zucchetti.PdfToExcelProcessor.ProgressListener;
 import lombok.NonNull;
 import java.util.function.BiConsumer;
 
 @Component
 public class ExcelLulExporter {
 
-	private static final DecimalFormat EXCEL_EXPORTER_DEFAULT_NUMERIC_FORMATTER = new DecimalFormat("0.00");
+	private ProgressListener progressListener;
 
-	public void export(@NonNull Map<String, List<MonthlyReport>> reportsForMonthMap,
+	public void setProgressListener(ProgressListener listener) {
+		this.progressListener = listener;
+	}
+
+	private void updateProgress(int percent) {
+		if (progressListener != null) {
+			progressListener.onProgress(percent);
+		}
+	}
+
+	public boolean export(@NonNull Map<String, List<MonthlyReport>> reportsForMonthMap,
 			@NonNull Path storageDirPath,
 			@NonNull String filename) {
 
@@ -65,16 +74,22 @@ public class ExcelLulExporter {
 
 			// ORDINAMENTO ALFABETICO PER COGNOME + NOME
 			monthlyReports.sort(Comparator.comparing(
-					r -> (r.getEmployee().getSurname() + " " + r.getEmployee().getName()).toLowerCase()
-			));
+					r -> (r.getEmployee().getSurname() + " " + r.getEmployee().getName()).toLowerCase()));
+
+			int total = monthlyReports.size();
+			int index = 0;
 
 			int startRow = 1;
-
 			for (MonthlyReport monthlyReport : monthlyReports) {
-				startRow = createRowsForEmployeeMonthlyReport(wb, sheet, monthlyReport, startRow);
-			}
-		});
 
+				startRow = createRowsForEmployeeMonthlyReport(wb, sheet, monthlyReport, startRow);
+
+				index++;
+				int percent = 20 + (int) ((index / (double) total) * 80);
+				updateProgress(percent);
+			}
+
+		});
 
 		Sheet templateSheet = wb.createSheet(WorkbookInfo.TEMPLATE_SHEET_NAME);
 		templateSheet.setDisplayGridlines(false);
@@ -99,7 +114,7 @@ public class ExcelLulExporter {
 					"   Chiudi il file Excel e riprova l'esportazione.\n" +
 					"============================================================\n" +
 					RESET);
-			return;
+			return false;
 
 		} catch (IOException e) {
 			System.err.println(RED +
@@ -109,7 +124,9 @@ public class ExcelLulExporter {
 					"   Dettagli: " + e.getMessage() + "\n" +
 					"============================================================\n" +
 					RESET);
+			return false;
 		}
+		return true;
 	}
 
 	private void createHeader(@NonNull Workbook wb, @NonNull Sheet sheet) {
@@ -157,11 +174,13 @@ public class ExcelLulExporter {
 			@NonNull MonthlyReport monthlyReport,
 			int startRow) {
 
-		AtomicInteger counter = new AtomicInteger(0);
+		AtomicInteger dayCounter = new AtomicInteger(0); // avanza sempre
+		AtomicInteger rowCounter = new AtomicInteger(0); // avanza solo se scrivi la riga
 
 		// Stili indipendenti
 		final CellStyle left = createLeftStyle(wb);
 		final CellStyle center = createCenterStyle(wb);
+		final CellStyle twoDecimalsStyle = createTwoDecimalsStyle(wb);
 
 		final Month month = monthlyReport.getMonth();
 		final int year = monthlyReport.getYear();
@@ -174,6 +193,10 @@ public class ExcelLulExporter {
 		// Funzione interna per scrivere una cella in base alla colonna
 		// ============================================================
 		BiConsumer<Cell, Integer> writeCell = (cell, column) -> {
+
+			DailyReport dr = null;
+			if (dailyReports != null && !dailyReports.isEmpty())
+				dr = dailyReports.get(dayCounter.get() - 1);
 
 			switch (column) {
 
@@ -190,50 +213,47 @@ public class ExcelLulExporter {
 				case 2: // Data
 					cell.setCellStyle(center);
 					LocalDate date = LocalDate.of(year, month.getMonthInYear(),
-							(dailyReports != null && !dailyReports.isEmpty())
-									? dailyReports.get(counter.get() - 1).getDay()
-									: counter.get());
+							(dr != null) ? dr.getDay() : 1);
 					cell.setCellValue(fullDayFormatter.format(date));
 					break;
 
 				case 3: // Presenza
 					cell.setCellStyle(center);
-					if (dailyReports != null && !dailyReports.isEmpty()) {
-						DailyReport dr = dailyReports.get(counter.get() - 1);
+					if (dr != null) {
 						cell.setCellValue(dr.isPresent() ? 1 : 0);
 					} else {
 						cell.setCellValue(0);
 					}
 					break;
 
-				case 25: // Ore lavorate
+				case 17: // Straordinari (STRAORDINARIA + FESTIVA)
 					cell.setCellStyle(center);
-					if (dailyReports != null && !dailyReports.isEmpty()) {
-						cell.setCellValue(EXCEL_EXPORTER_DEFAULT_NUMERIC_FORMATTER.format(
-								dailyReports.get(counter.get() - 1).getTotWorkingHours()));
-					} else {
-						cell.setCellValue("");
+					if (dr != null) {
+						int extraMinutes = dr.getExtraMinutes();
+						if (extraMinutes > 0) {
+							cell.setCellValue(extraMinutes);
+						}
+					}
+					break;
+
+				case 25: // Ore lavorate (ordinarie + straordinarie/festive)
+					cell.setCellStyle(twoDecimalsStyle);
+					if (dr != null) {
+						cell.setCellValue(dr.getWorkedHours());
 					}
 					break;
 
 				case 26: // Ore non lavorate
-					cell.setCellStyle(center);
-					if (dailyReports != null && !dailyReports.isEmpty()) {
-						cell.setCellValue(EXCEL_EXPORTER_DEFAULT_NUMERIC_FORMATTER.format(
-								dailyReports.get(counter.get() - 1).getTotNonWorkingHours()));
-					} else {
-						cell.setCellValue("");
+					cell.setCellStyle(twoDecimalsStyle);
+					if (dr != null) {
+						cell.setCellValue(dr.getNonWorkedHours());
 					}
 					break;
 
-				case 27: // Totale ore
-					cell.setCellStyle(center);
-					if (dailyReports != null && !dailyReports.isEmpty()) {
-						DailyReport dr = dailyReports.get(counter.get() - 1);
-						float tot = dr.getTotWorkingHours() + dr.getTotNonWorkingHours();
-						cell.setCellValue(EXCEL_EXPORTER_DEFAULT_NUMERIC_FORMATTER.format(tot));
-					} else {
-						cell.setCellValue("");
+				case 27: // Totale ore (ordinarie + straordinarie/festive + assenze)
+					cell.setCellStyle(twoDecimalsStyle);
+					if (dr != null) {
+						cell.setCellValue(dr.getTotalHours());
 					}
 					break;
 
@@ -286,6 +306,14 @@ public class ExcelLulExporter {
 
 			for (DailyReport dailyReport : dailyReports) {
 
+				// Incremento SEMPRE il dayCounter
+				dayCounter.incrementAndGet();
+
+				// Se totale ore = 0 → NON scrivere la riga
+				if (dailyReport.getTotalHours() <= 0f) {
+					continue;
+				}
+
 				// Salta dimissioni
 				List<Pair<AbsenceType, Integer>> absences = dailyReport.getAbscenceMinutes();
 				if (absences != null && !absences.isEmpty()) {
@@ -295,14 +323,9 @@ public class ExcelLulExporter {
 					}
 				}
 
-				// Salta festivi
-				if (NationalHolidays.isPublicHoliday(month, dailyReport.getDay(), year)) {
-					continue;
-				}
-
-				Row row = sheet.createRow(startRow + counter.get());
+				Row row = sheet.createRow(startRow + rowCounter.get());
 				row.setHeightInPoints(12);
-				counter.incrementAndGet();
+				rowCounter.incrementAndGet();
 
 				// Pre-calcolo assenze
 				Map<Integer, Integer> absenceMinutesByColumn = new HashMap<>();
@@ -314,7 +337,7 @@ public class ExcelLulExporter {
 							continue;
 						Integer colIndex = COLUMN_MAP.get(type.getColumnName());
 						if (colIndex != null) {
-							absenceMinutesByColumn.merge(colIndex, minutes, Integer::sum);
+							absenceMinutesByColumn.compute(colIndex, (k, v) -> (v == null ? minutes : v + minutes));
 						}
 					}
 				}
@@ -335,34 +358,35 @@ public class ExcelLulExporter {
 				}
 			}
 
-			return startRow + counter.get();
+			return startRow + rowCounter.get();
 		}
 
 		// ========================================================================
 		// CASO 2: nessuna presenza → Opzione C (una sola riga per il primo giorno)
 		// ========================================================================
 
-		Row row = sheet.createRow(startRow + counter.get());
+		Row row = sheet.createRow(startRow + rowCounter.get());
 		row.setHeightInPoints(12);
-		counter.incrementAndGet();
+		rowCounter.incrementAndGet();
 
 		for (int column = 0; column < WorkbookInfo.SHEET_COLUMN_NAMES.length; column++) {
 			Cell cell = row.createCell(column);
 			writeCell.accept(cell, column);
 		}
 
-		return startRow + counter.get();
+		return startRow + rowCounter.get();
 	}
+
+	private CellStyle createTwoDecimalsStyle(@NonNull Workbook wb) {
+		CellStyle style = createDataCellStyle(wb);
+		DataFormat format = wb.createDataFormat();
+		style.setDataFormat(format.getFormat("0.00"));
+		return style;
+	}	
 
 	private CellStyle createLeftStyle(Workbook wb) {
 		CellStyle style = createDataCellStyle(wb);
 		style.setAlignment(HorizontalAlignment.LEFT);
-		return style;
-	}
-
-	private CellStyle createRightStyle(Workbook wb) {
-		CellStyle style = createDataCellStyle(wb);
-		style.setAlignment(HorizontalAlignment.RIGHT);
 		return style;
 	}
 

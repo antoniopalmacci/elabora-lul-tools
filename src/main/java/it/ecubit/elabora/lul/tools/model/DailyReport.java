@@ -23,36 +23,102 @@ import lombok.ToString;
 public class DailyReport implements Serializable {
 
     private static final long serialVersionUID = 3653696124341974718L;
-    
+
     private int day;
     private WeekDay weekDay;
-    private Pair<WorkAttendanceType, Integer> ordinaryWorkAttendanceMinutes;
-    private Pair<WorkAttendanceType, Integer> extraWorkAttendanceMinutes;
-    private List<Pair<AbsenceType, Integer>> abscenceMinutes;
+    private Pair<WorkAttendanceType, Integer> ordinaryWorkAttendanceMinutes; // minuti
+    private Pair<WorkAttendanceType, Integer> extraWorkAttendanceMinutes;    // minuti
+    private List<Pair<AbsenceType, Integer>> abscenceMinutes;               // minuti
 
+    // ------------------------------------------------------------
+    // PRESENZA
+    // ------------------------------------------------------------
     public boolean isPresent() {
-        int ordinaryWorkMinutes = (ordinaryWorkAttendanceMinutes != null && ordinaryWorkAttendanceMinutes.getRight() != null)? ordinaryWorkAttendanceMinutes.getRight() : 0;
-        int extraWorkMinutes = (extraWorkAttendanceMinutes != null && extraWorkAttendanceMinutes.getRight() != null)? extraWorkAttendanceMinutes.getRight() : 0;
-        return (ordinaryWorkMinutes + extraWorkMinutes) > 0;
+        return getWorkedMinutes() > 0;
     }
 
-    public float getTotWorkingHours() {
-        int ordinaryWorkMinutes = (ordinaryWorkAttendanceMinutes != null && ordinaryWorkAttendanceMinutes.getRight() != null)? ordinaryWorkAttendanceMinutes.getRight() : 0;
-        int extraWorkMinutes = (extraWorkAttendanceMinutes != null && extraWorkAttendanceMinutes.getRight() != null)? extraWorkAttendanceMinutes.getRight() : 0;
-        return (((float) (ordinaryWorkMinutes + extraWorkMinutes)) / 60.0f);
+    // ------------------------------------------------------------
+    // MINUTI
+    // ------------------------------------------------------------
+
+    /** Minuti ordinari */
+    public int getOrdinaryMinutes() {
+        if (ordinaryWorkAttendanceMinutes == null || ordinaryWorkAttendanceMinutes.getRight() == null)
+            return 0;
+        return ordinaryWorkAttendanceMinutes.getRight();
     }
 
-    public float getTotNonWorkingHours() {
-        int nonWorkingMinutes = 0;
+    /** Minuti straordinari o festivi */
+    public int getExtraMinutes() {
+        if (extraWorkAttendanceMinutes == null || extraWorkAttendanceMinutes.getRight() == null)
+            return 0;
+        return extraWorkAttendanceMinutes.getRight();
+    }
 
+    /** Minuti lavorati totali (ordinarie + straordinarie/festive) */
+    public int getWorkedMinutes() {
+        return getOrdinaryMinutes() + getExtraMinutes();
+    }
+
+    /** Minuti non lavorati (assenze) */
+    public int getNonWorkedMinutes() {
+        int total = 0;
         if (abscenceMinutes != null) {
             for (Pair<AbsenceType, Integer> p : abscenceMinutes) {
                 if (p != null && p.getRight() != null) {
-                    nonWorkingMinutes += p.getRight();
+                    total += p.getRight();
                 }
             }
         }
-
-        return (((float) nonWorkingMinutes) / 60.0f);
+        return total;
     }
+
+    /** Minuti totali (lavorati + assenze) */
+    public int getTotalMinutes() {
+        return getWorkedMinutes() + getNonWorkedMinutes();
+    }
+
+    // ------------------------------------------------------------
+    // ORE (float)
+    // ------------------------------------------------------------
+
+    /** Ore lavorate totali (ordinarie + straordinarie/festive) */
+    public float getWorkedHours() {
+        return getWorkedMinutes() / 60.0f;
+    }
+
+    /** Ore straordinarie/festive */
+    public float getExtraHours() {
+        return getExtraMinutes() / 60.0f;
+    }
+
+    /** Ore ordinarie */
+    public float getOrdinaryHours() {
+        return getOrdinaryMinutes() / 60.0f;
+    }
+
+    /** Ore non lavorate (assenze) */
+    public float getNonWorkedHours() {
+        return getNonWorkedMinutes() / 60.0f;
+    }
+
+    /** Ore totali (lavorate + assenze) */
+    public float getTotalHours() {
+        return getTotalMinutes() / 60.0f;
+    }
+
+    // ------------------------------------------------------------
+    // Compatibilità con i vecchi metodi
+    // ------------------------------------------------------------
+
+    /*
+    public float getTotWorkingHours() {
+        return getWorkedHours();
+    }
+
+ 
+    public float getTotNonWorkingHours() {
+        return getNonWorkedHours();
+    }
+        */
 }

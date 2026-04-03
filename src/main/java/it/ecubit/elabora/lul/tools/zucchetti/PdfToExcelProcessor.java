@@ -34,13 +34,34 @@ public class PdfToExcelProcessor {
         this.excelLulExporter = excelLulExporter;
     }
 
+    public interface ProgressListener {
+        void onProgress(int percent);
+    }
+
+    private ProgressListener listener;
+
+    public void setProgressListener(ProgressListener listener) {
+        this.listener = listener;
+    }
+
+    private void updateProgress(int percent) {
+        if (listener != null) {
+            listener.onProgress(percent);
+        }
+    }
+
     public boolean process(Path pdfPath, Path outputDir) {
+        excelLulExporter.setProgressListener(this::updateProgress);
 
         try {
+            updateProgress(0);
             log.info("Analisi PDF: {}", pdfPath);
 
             List<String> pages = pdfReportParser.extractTextFromAllPages(pdfPath.toString());
-            log.info("Estratte {} pagine", pages.size());
+            int totalPages = pages.size();
+            log.info("Estratte {} pagine", totalPages);
+            double perPage = 20.0 / totalPages;
+            double[] progressArr = { 0 };
 
             Map<String, List<MonthlyReport>> reportsForMonthMap = new HashMap<>();
 
@@ -54,6 +75,7 @@ public class PdfToExcelProcessor {
 
                 if (page.contains("RIEPILOGO GENERALE")) {
                     log.info("Ignoro pagina {} (RIEPILOGO GENERALE)", pageIndex);
+                    advancePage(perPage, progressArr, pageIndex);
                     pageIndex++;
                     continue;
                 }
@@ -65,6 +87,7 @@ public class PdfToExcelProcessor {
                     boolean isPageA = pe != null && pe.getId() != null;
                     boolean isPageB = pe != null && pe.getId() == null;
 
+                    Objects.requireNonNull(pe, "pe è null!");
                     if (isPageA) {
 
                         if (currentReport != null && currentReport.getMonth() != null) {
@@ -78,6 +101,7 @@ public class PdfToExcelProcessor {
                         log.info("Caricato cedolino A per {} {} (pagina {})",
                                 pe.getSurname(), pe.getName(), pageIndex);
 
+                        advancePage(perPage, progressArr, pageIndex);
                         pageIndex++;
                         continue;
                     }
@@ -92,6 +116,7 @@ public class PdfToExcelProcessor {
                         if (isSameEmployeeAsPreviousB) {
                             log.info("Ignoro pagina B duplicata per {} {} (pagina {})",
                                     pe.getSurname(), pe.getName(), pageIndex);
+                            advancePage(perPage, progressArr, pageIndex);
                             pageIndex++;
                             continue;
                         }
@@ -116,6 +141,7 @@ public class PdfToExcelProcessor {
                                 target.setTerminationDate(pe.getTerminationDate());
 
                             lastWasPageA = false;
+                            advancePage(perPage, progressArr, pageIndex);
                             pageIndex++;
                             continue;
                         }
@@ -133,6 +159,7 @@ public class PdfToExcelProcessor {
                             log.info("Caricato cedolino B senza A per {} {} (pagina {})",
                                     pe.getSurname(), pe.getName(), pageIndex);
 
+                            advancePage(perPage, progressArr, pageIndex);
                             pageIndex++;
                             continue;
                         }
@@ -140,6 +167,7 @@ public class PdfToExcelProcessor {
 
                 } catch (Exception exc) {
                     log.error("Errore parsing pagina {}: {}", pageIndex, exc.getMessage());
+                    advancePage(perPage, progressArr, pageIndex);
                     pageIndex++;
                 }
             }
@@ -151,22 +179,31 @@ public class PdfToExcelProcessor {
 
             outputDir.toFile().mkdirs();
 
-            String pdfFilename = pdfPath.getFileName().toString();
-            String excelFilename = "Lul-" + FilenameUtils.removeExtension(pdfFilename) + ".xlsx";
+            this.lastGeneratedFilename = OutputFilename(pdfPath);
+            log.info("Esporto Excel: {}", this.lastGeneratedFilename);
 
-            this.lastGeneratedFilename = excelFilename;
-
-            log.info("Esporto Excel: {}", excelFilename);
-
-            excelLulExporter.export(reportsForMonthMap, outputDir, excelFilename);
+            if (!excelLulExporter.export(reportsForMonthMap, outputDir, this.lastGeneratedFilename)) {
+                return false;
+            }
 
             log.info("Esportazione completata");
-
-            return true; // SUCCESSO
+            return true;
 
         } catch (Exception e) {
             log.error("Errore durante l'elaborazione: {}", e.getMessage());
-            return false; // FALLIMENTO
+            return false;
         }
     }
+
+    public String OutputFilename(Path pdfPath) {
+        String pdfFilename = pdfPath.getFileName().toString();
+        String excelFilename = "Lul-" + FilenameUtils.removeExtension(pdfFilename) + ".xlsx";
+        return excelFilename;
+    }
+
+    private void advancePage(double perPage, double[] progress, int pageIndex) {
+        progress[0] += perPage;
+        updateProgress((int) progress[0]);
+    }
+
 }
